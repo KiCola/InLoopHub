@@ -485,6 +485,9 @@ def rules() -> None:
 @app.command("build-wechat")
 def build_wechat(
     target: str = typer.Argument(..., help="文章目录、index.md 路径或 slug"),
+    theme: str = typer.Option(
+        None, "--theme", help="排版主题，见 `inloop themes`；默认取 config/wechat.yaml"
+    ),
 ) -> None:
     """构建微信公众号产物（任务书 §8）。"""
     config = _config_or_fail()
@@ -493,7 +496,7 @@ def build_wechat(
     from inloop.build import BuildError, build_article
 
     try:
-        outcome = build_article(article, config=config)
+        outcome = build_article(article, config=config, theme=theme)
     except BuildError as exc:
         err_console.print(f"[bold red]✗[/bold red] {escape(str(exc))}")
         raise typer.Exit(code=EXIT_VALIDATION_FAILED) from exc
@@ -508,6 +511,30 @@ def build_wechat(
         console.print(f"  {relative.as_posix():28s} {_human_size(size)}")
 
     _print_warnings(outcome.warnings)
+
+
+@app.command("themes")
+def themes() -> None:
+    """列出可用的排版主题。"""
+    from inloop.renderer.wechat import available_themes, theme_name
+
+    config = _config_or_fail()
+    names = available_themes(config)
+    if not names:
+        console.print("styles/themes/ 下没有主题文件。")
+        return
+
+    current = theme_name(config)
+    console.print("[bold]可用主题[/bold]")
+    for name in names:
+        mark = " [green]（当前）[/green]" if name == current else ""
+        console.print(f"  [bold]{name}[/bold]{mark}")
+
+    console.print()
+    console.print(
+        f"切换方式：改 {_relative(config.root / 'config' / 'wechat.yaml', config.root)} "
+        f"的 `theme`，或用 `inloop build-wechat <文章> --theme <名称>` 临时指定。"
+    )
 
 
 @app.command("preview-wechat")

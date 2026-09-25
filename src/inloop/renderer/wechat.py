@@ -27,6 +27,9 @@ ARTICLE_TAG = "div"
 #: 正文容器在样式表中的选择器。产物中容器不带 class，该规则只用于取容器自身样式。
 CONTAINER_SELECTOR = ".inloop-article"
 
+#: 默认主题名
+DEFAULT_THEME = "standard"
+
 #: 图片说明使用的标记 class 名。产物中会被去掉，仅用于生成阶段查询样式。
 CAPTION_MARKER = "inloop-caption"
 
@@ -113,25 +116,63 @@ class StyleSheet:
         return merged
 
 
-def load_stylesheet(config: Config) -> StyleSheet:
-    """读取并解析样式表。
+def load_stylesheet(config: Config, theme: str = DEFAULT_THEME) -> StyleSheet:
+    """按主题读取并合并样式表。
 
-    依次读取 ``styles/wechat.css`` 与 ``styles/code.css``，后者用于语法着色，
-    仅在 Pygments 可用时生效。
+    合并顺序：``styles/base.css`` → ``styles/code.css`` → ``styles/themes/<主题>.css``。
+    后加载的同名属性覆盖先加载的，因此主题文件只管**节奏**（字号、行高、间距、
+    标题形式、卡片外形），共用部分只维护一份。
+
+    Args:
+        config: 配置，用于定位仓库根。
+        theme: 主题名，对应 ``styles/themes/<名称>.css``。
+
+    Raises:
+        StyleError: 样式文件缺失，或选择器含无法内联的写法。
     """
     styles_dir = config.root / "styles"
+    paths = [
+        styles_dir / "base.css",
+        styles_dir / "code.css",
+        styles_dir / "themes" / f"{theme}.css",
+    ]
+
     parts: list[str] = []
-    for name in ("wechat.css", "code.css"):
-        path = styles_dir / name
+    for path in paths:
         if not path.is_file():
+            if path.name == f"{theme}.css":
+                available = "、".join(available_themes(config)) or "（无）"
+                raise StyleError(
+                    f"找不到主题 `{theme}`：{path} 不存在。\n"
+                    f"可用主题：{available}。\n"
+                    f"修正方法：改用上述之一，或在 styles/themes/ 下新建 `{theme}.css`。"
+                )
             raise StyleError(
                 f"缺少样式文件：{path}\n"
-                f"修正方法：确认 styles/ 目录下存在 {name}；该文件是样式的唯一事实源，"
+                f"修正方法：确认 styles/ 目录完整；该文件是样式的唯一事实源，"
                 f"代码中不硬编码颜色与字号。"
             )
         parts.append(path.read_text(encoding="utf-8"))
 
     return parse_css("\n".join(parts))
+
+
+def available_themes(config: Config) -> tuple[str, ...]:
+    """列出可用主题名，按字母序。"""
+    themes_dir = config.root / "styles" / "themes"
+    if not themes_dir.is_dir():
+        return ()
+    return tuple(sorted(path.stem for path in themes_dir.glob("*.css")))
+
+
+def theme_name(config: Config) -> str:
+    """取配置中指定的主题名，缺省时用默认主题。"""
+    try:
+        value = config.wechat_value("theme")
+    except Exception:
+        return DEFAULT_THEME
+    text = str(value).strip()
+    return text or DEFAULT_THEME
 
 
 def parse_css(text: str) -> StyleSheet:
@@ -315,6 +356,7 @@ def render_wechat_html(
     *,
     config: Config,
     stylesheet: StyleSheet | None = None,
+    theme: str | None = None,
     container: bool = True,
 ) -> WechatRenderResult:
     """把规范化后的 HTML 渲染为微信兼容 HTML。
@@ -322,13 +364,14 @@ def render_wechat_html(
     Args:
         body_html: 正文 HTML 片段。
         config: 配置（提供字号、代码主题等）。
-        stylesheet: 已解析的样式表；为 None 时自动加载。
+        stylesheet: 已解析的样式表；为 None 时按主题加载。
+        theme: 主题名；为 None 时取配置里的 ``wechat.theme``。
         container: 是否套上正文容器标签。产物需要，预览外壳不需要。
 
     Returns:
         渲染结果。
     """
-    sheet = stylesheet or load_stylesheet(config)
+    sheet = stylesheet or load_stylesheet(config, theme or theme_name(config))
     soup = BeautifulSoup(body_html, "html.parser")
 
     _apply_code_highlighting(soup)

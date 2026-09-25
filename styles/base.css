@@ -1,0 +1,196 @@
+/* ==========================================================================
+   InLoop 手记 —— 公众号排版基础样式（被各主题叠加）
+   ==========================================================================
+
+   本文件只定义**所有主题共用**的部分：
+
+   - 颜色（克莱茵蓝 + 灰阶）
+   - 字体族与代码字体
+   - 图片、表格、分割线等结构性元素的最小规则
+
+   各主题文件（styles/themes/*.css）负责覆盖**节奏**：字号、行高、段间距、
+   标题形式、卡片外形。构建时按「base → 主题」的顺序合并，后出现者覆盖前者。
+
+   选择器约定（所有主题都必须遵守）：
+
+   - 只用元素/后代选择器，**不要给元素加 class**。产物零 class：
+     class 在粘贴后可能丢失，且会成为编辑器样式重写的突破口。
+   - 无法内联的写法（:hover、::before、#id、媒体查询）会被构建直接拒绝。
+   - 单位一律 px；微信编辑器会改写真相对单位。
+
+   两条硬约束（任务书 §9.2）：
+   - 不得依赖 JavaScript、外部 CSS、iframe。
+   - 不得引入只在浏览器里成立、粘进编辑器就失效的机制。
+   ========================================================================== */
+
+:root {
+  /* 品牌主色：克莱茵蓝 Klein Blue */
+  --brand-primary: #002fa7;
+  --brand-primary-soft: #eef2fb;
+  --brand-text: #22252b;
+  --brand-secondary-text: #6b7280;
+  --brand-background: #ffffff;
+  --brand-quote-bg: #f5f7fb;
+  --brand-code-bg: #f7f8fa;
+  --brand-border: #e5e7eb;
+
+  /* 深色卡片：用于引述外部内容（推文、公告），与浅底卡片形成层次 */
+  --brand-dark-bg: #16181d;
+  --brand-dark-text: #e8eaed;
+}
+
+/* 正文容器：字体族与基础色在这里定义一次，各主题只覆盖节奏 */
+.inloop-article {
+  color: var(--brand-text);
+  background: var(--brand-background);
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  word-break: break-word;
+}
+
+/* 图片：全宽但不超出容器，居中，上下留白（任务书 §10） */
+.inloop-article img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 24px auto;
+}
+
+/* 表格：可读、有边框、不撑破手机宽度 */
+.inloop-article table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.inloop-article th {
+  padding: 8px 10px;
+  border: 1px solid var(--brand-border);
+  background: var(--brand-quote-bg);
+  font-weight: 700;
+  text-align: left;
+  color: var(--brand-text);
+}
+
+.inloop-article td {
+  padding: 8px 10px;
+  border: 1px solid var(--brand-border);
+  color: var(--brand-text);
+}
+
+/* 链接：用主色，不带下划线以免正文显得凌乱 */
+.inloop-article a {
+  color: var(--brand-primary);
+  text-decoration: none;
+}
+
+/* 行内代码 */
+.inloop-article code {
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--brand-code-bg);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 14px;
+  color: var(--brand-primary);
+}
+
+/* 代码块：等宽、可横向滚动、适配手机（任务书 §10） */
+.inloop-article pre {
+  padding: 14px 16px;
+  overflow-x: auto;
+  border-radius: 4px;
+  background: var(--brand-code-bg);
+  border: 1px solid var(--brand-border);
+}
+
+.inloop-article pre code {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--brand-text);
+  white-space: pre;
+}
+
+/* 删除线：低饱和灰，弱化而不是抹掉 */
+.inloop-article s,
+.inloop-article del {
+  color: var(--brand-secondary-text);
+}
+
+/* 加粗 */
+.inloop-article strong {
+  font-weight: 700;
+}
+
+/* 分割线 */
+.inloop-article hr {
+  border: none;
+  border-top: 1px solid var(--brand-border);
+}
+
+/* 脚注降级区（结构由 normalize 阶段改写，样式在此统一） */
+.inloop-article section {
+  padding-top: 16px;
+  border-top: 1px solid var(--brand-border);
+}
+
+.inloop-article section p {
+  font-weight: 700;
+  color: var(--brand-secondary-text);
+}
+
+.inloop-article section ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.inloop-article section li {
+  color: var(--brand-secondary-text);
+}
+
+/* 上标：用于脚注引用（normalize 阶段已去除锚点链接） */
+.inloop-article sup {
+  font-size: 12px;
+  line-height: 0;
+  vertical-align: super;
+  color: var(--brand-secondary-text);
+}
+
+/* 卡片：两种形态，用互斥选择器区分，避免"深底被浅底规则盖掉"。
+   - 普通引用（`> 内容`）→ 浅底卡片
+   - 嵌套引用（`> > 内容`）→ 深底卡片，用于引述推文、公告、外部评测
+
+   各主题只覆盖圆角与内距；颜色与文字色在此统一，且两种形态不会互相干扰。 */
+.inloop-article blockquote {
+  background: var(--brand-quote-bg);
+}
+
+.inloop-article blockquote blockquote {
+  background: var(--brand-dark-bg);
+}
+
+.inloop-article blockquote blockquote p {
+  color: var(--brand-dark-text);
+}
+
+.inloop-article blockquote blockquote strong {
+  color: #ffffff;
+}
+
+.inloop-article blockquote blockquote a {
+  color: #9ec1ff;
+}
+
+.inloop-article blockquote blockquote code {
+  background: rgba(255, 255, 255, 0.12);
+  color: #e8eaed;
+}
+
+/* 图注：由构建脚本按图片的 title（无则 alt）自动生成（任务书 §10） */
+.inloop-article .inloop-caption {
+  text-align: center;
+  color: var(--brand-secondary-text);
+}

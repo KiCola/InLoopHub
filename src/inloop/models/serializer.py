@@ -21,6 +21,7 @@ from typing import Any
 
 import yaml
 
+from inloop.fsutil import write_text
 from inloop.models.article import Article
 
 #: Front Matter 的字段顺序。
@@ -159,18 +160,14 @@ def render_article_text(article: Article, body: str | None = None) -> str:
 def write_article(article: Article, path: Path, body: str | None = None) -> Path:
     """把文章写入文件。
 
-    写入采用「先写临时文件再替换」，避免中断时留下半截文件
-    （docs/architecture.md 附录的安全约定）。
+    写入采用「先写临时文件再替换」，避免中断时留下半截文件；
+    并带重试以跨过 Windows 上的瞬时文件占用（见 :mod:`inloop.fsutil`）。
 
     Returns:
         实际写入的路径。
     """
     text = render_article_text(article, body=body)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(text, encoding="utf-8", newline="\n")
-    temp.replace(path)
-    return path
+    return write_text(path, text)
 
 
 # --- 内部辅助 -------------------------------------------------------------

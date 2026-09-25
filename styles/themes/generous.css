@@ -1,0 +1,139 @@
+/* ==========================================================================
+   主题 C · 慷慨
+   ==========================================================================
+
+   风格定位：**留白充足、视觉层次强**。最接近所给参考截图的观感。
+
+   特点：
+   - 行高 1.95、段间距 36px，读起来很松
+   - 标题：主色圆角底块内写白色数字 + 标题，视觉锚点最强
+   - 卡片：浅底大圆角；**另提供深底大圆角**（`.inloop-article blockquote blockquote`）
+     用于引述外部内容，与浅底形成明确层次
+
+   代价：同样字数下页面更长。适合论述型、需要强调层次的稿件。
+   ========================================================================== */
+
+.inloop-article {
+  font-size: 16px;
+  line-height: 1.95;
+  letter-spacing: 0.015em;
+  text-align: justify;
+}
+
+.inloop-article p {
+  margin: 0 0 36px 0;
+  font-size: 16px;
+  line-height: 1.95;
+}
+
+/* 一级标题：主色底块，白色文字，居中 */
+.inloop-article h1 {
+  margin: 52px 0 32px 0;
+  padding: 12px 18px;
+  border-radius: 6px;
+  background: var(--brand-primary);
+  font-size: 18px;
+  line-height: 1.5;
+  font-weight: 700;
+  text-align: center;
+  color: #ffffff;
+}
+
+/* 二级标题：浅蓝底块 + 主色文字，左对齐 */
+.inloop-article h2 {
+  margin: 40px 0 24px 0;
+  padding: 10px 16px;
+  border-radius: 6px;
+  background: var(--brand-primary-soft);
+  font-size: 17px;
+  line-height: 1.5;
+  font-weight: 700;
+  color: var(--brand-primary);
+}
+
+.inloop-article h3 {
+  margin: 32px 0 18px 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--brand-text);
+}
+
+.inloop-article h4 {
+  margin: 24px 0 14px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--brand-secondary-text);
+}
+
+/* 浅底大圆角卡片 */
+.inloop-article blockquote {
+  margin: 36px 0;
+  padding: 24px 26px;
+  border-radius: 10px;
+}
+
+.inloop-article blockquote p {
+  margin: 0 0 14px 0;
+  font-size: 16px;
+  line-height: 1.9;
+}
+
+.inloop-article blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* 深底卡片的圆角与内距由本主题决定；颜色与文字色统一在 base.css */
+.inloop-article blockquote blockquote {
+  border-radius: 10px;
+  padding: 22px 24px;
+}
+.inloop-article section {
+  margin-top: 48px;
+}
+
+.inloop-article section p {
+  font-size: 14px;
+}
+
+.inloop-article ul,
+.inloop-article ol {
+  margin: 0 0 36px 0;
+  padding-left: 28px;
+}
+
+.inloop-article li {
+  margin-bottom: 12px;
+  line-height: 1.95;
+}
+
+.inloop-article pre {
+  margin: 32px 0;
+  padding: 20px 22px;
+  border-radius: 8px;
+  border: none;
+}
+
+.inloop-article table {
+  margin: 32px 0;
+}
+
+.inloop-article th {
+  padding: 10px 12px;
+}
+
+.inloop-article td {
+  padding: 10px 12px;
+}
+
+.inloop-article hr {
+  margin: 48px auto;
+  width: 40%;
+  border-top: 2px solid var(--brand-primary-soft);
+}
+
+.inloop-article .inloop-caption {
+  margin: -14px 0 32px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+

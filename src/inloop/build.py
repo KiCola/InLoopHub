@@ -30,10 +30,16 @@ from pathlib import Path
 
 from inloop.assets.pipeline import AssetError, AssetResult, ImageAsset, prepare_images
 from inloop.config import Config, load_config
+from inloop.fsutil import write_text
 from inloop.models.article import Article
 from inloop.normalize import normalize_html
 from inloop.parser.markdown import render_markdown
-from inloop.renderer.wechat import StyleError, load_stylesheet, render_wechat_html
+from inloop.renderer.wechat import (
+    StyleError,
+    load_stylesheet,
+    render_wechat_html,
+    theme_name,
+)
 
 #: 产物根目录名（相对仓库根）
 DIST_DIR = "dist"
@@ -80,6 +86,7 @@ def build_article(
     config: Config | None = None,
     article_dir: Path | None = None,
     root: Path | None = None,
+    theme: str | None = None,
 ) -> BuildOutcome:
     """构建一篇微信公众号文章。
 
@@ -88,6 +95,7 @@ def build_article(
         config: 配置；为 None 时自动加载。
         article_dir: 文章所在目录；为 None 时由 ``article.source`` 推断。
         root: 仓库根；为 None 时由配置推断。
+        theme: 排版主题名；为 None 时取配置里的 ``wechat.theme``。
 
     Returns:
         构建结果。
@@ -145,7 +153,7 @@ def build_article(
 
     # 5) 加样式：CSS 内联 + 白名单清洗
     try:
-        stylesheet = load_stylesheet(resolved_config)
+        stylesheet = load_stylesheet(resolved_config, theme or theme_name(resolved_config))
         wechat = render_wechat_html(rewritten_html, config=resolved_config, stylesheet=stylesheet)
     except StyleError as exc:
         raise BuildError(str(exc)) from exc
@@ -305,12 +313,8 @@ def _escape(text: str) -> str:
 
 
 def _write(path: Path, content: str) -> Path:
-    """写文本文件：UTF-8、LF、临时文件再替换。"""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(content, encoding="utf-8", newline="\n")
-    temp.replace(path)
-    return path
+    """写文本文件：UTF-8、LF、原子替换（带重试）。"""
+    return write_text(path, content)
 
 
 def _rewrite_image_sources(html: str, mapping: dict[str, str]) -> str:

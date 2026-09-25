@@ -1,0 +1,132 @@
+/* ==========================================================================
+   主题 B · 标准
+   ==========================================================================
+
+   风格定位：**克制、耐读**。接近石麻笔记那类账号的观感，但保留 01 编号。
+
+   特点：
+   - 行高 1.85、段间距 28px，段间呼吸明显
+   - 标题：居中、主色数字与标题上下分两行，两侧细横线（刊物感）
+   - 卡片：浅底圆角，内距大；深底圆角卡片用于引述外部内容
+
+   适用：论文拆解、研究随想这类以论述为主的文章。
+   ========================================================================== */
+
+.inloop-article {
+  font-size: 16px;
+  line-height: 1.85;
+  letter-spacing: 0.01em;
+}
+
+.inloop-article p {
+  margin: 0 0 28px 0;
+  font-size: 16px;
+  line-height: 1.85;
+}
+
+/* 一级标题：居中，主色数字 + 标题分两行，两侧细横线 */
+.inloop-article h1 {
+  margin: 48px 0 28px 0;
+  padding: 14px 0;
+  border-top: 1px solid var(--brand-border);
+  border-bottom: 1px solid var(--brand-border);
+  font-size: 18px;
+  line-height: 1.5;
+  font-weight: 700;
+  text-align: center;
+  color: var(--brand-text);
+}
+
+/* 二级标题：主色，居中 */
+.inloop-article h2 {
+  margin: 36px 0 20px 0;
+  font-size: 17px;
+  line-height: 1.5;
+  font-weight: 700;
+  text-align: center;
+  color: var(--brand-primary);
+}
+
+.inloop-article h3 {
+  margin: 28px 0 16px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--brand-text);
+}
+
+.inloop-article h4 {
+  margin: 22px 0 12px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--brand-secondary-text);
+}
+
+/* 浅底圆角卡片 */
+.inloop-article blockquote {
+  margin: 32px 0;
+  padding: 22px 24px;
+  border-radius: 8px;
+}
+
+.inloop-article blockquote p {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  line-height: 1.85;
+}
+
+.inloop-article blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* 深底卡片：引述外部内容时使用（正文写作 `> > 引文`）。
+   必须在此覆盖通用 blockquote 的 background，否则会被它盖掉，
+   表现为「写了深底却渲染成浅底」。 */
+.inloop-article blockquote blockquote {
+  padding: 22px 24px;
+  border-radius: 8px;
+  background: var(--brand-dark-bg);
+}
+
+.inloop-article blockquote blockquote p {
+  color: var(--brand-dark-text);
+  font-size: 15px;
+  line-height: 1.85;
+}
+
+.inloop-article section {
+  margin-top: 40px;
+}
+
+.inloop-article section p {
+  font-size: 14px;
+}
+
+.inloop-article ul,
+.inloop-article ol {
+  margin: 0 0 28px 0;
+  padding-left: 26px;
+}
+
+.inloop-article li {
+  margin-bottom: 10px;
+  line-height: 1.85;
+}
+
+.inloop-article pre {
+  margin: 28px 0;
+}
+
+.inloop-article table {
+  margin: 28px 0;
+}
+
+.inloop-article hr {
+  margin: 40px 0;
+}
+
+.inloop-article .inloop-caption {
+  margin: -12px 0 28px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+

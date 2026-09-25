@@ -1,0 +1,131 @@
+/* ==========================================================================
+   主题 A · 紧凑
+   ==========================================================================
+
+   风格定位：**信息密度高、控制感强**。适合偏技术、需要在一屏内看到更多内容的文章。
+
+   特点：
+   - 行高 1.75、段间距 24px —— 比 base 略松，但仍偏紧凑
+   - 标题：主色大号数字 + 标题同行，下方一道主色下划线
+   - 卡片：浅底方角为主，深底卡片同样方角带主色左条
+
+   适用：代码密集的源码分析、实验日志。
+   ========================================================================== */
+
+.inloop-article {
+  font-size: 15px;
+  line-height: 1.75;
+  letter-spacing: 0.01em;
+}
+
+.inloop-article p {
+  margin: 0 0 24px 0;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+/* 一级标题：主色数字 + 标题，下方主色下划线 */
+.inloop-article h1 {
+  margin: 40px 0 24px 0;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--brand-primary);
+  font-size: 19px;
+  line-height: 1.45;
+  font-weight: 700;
+  color: var(--brand-text);
+}
+
+/* 二级标题：主色数字 + 标题，无额外装饰 */
+.inloop-article h2 {
+  margin: 32px 0 18px 0;
+  font-size: 17px;
+  line-height: 1.45;
+  font-weight: 700;
+  color: var(--brand-primary);
+}
+
+.inloop-article h3 {
+  margin: 24px 0 14px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--brand-text);
+}
+
+.inloop-article h4 {
+  margin: 20px 0 12px 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--brand-secondary-text);
+}
+
+/* 浅底卡片：方角 + 左侧主色细条 */
+.inloop-article blockquote {
+  margin: 28px 0;
+  padding: 18px 20px;
+  border-left: 3px solid var(--brand-primary);
+  border-radius: 2px;
+}
+
+.inloop-article blockquote p {
+  margin: 0 0 10px 0;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.inloop-article blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* 深底卡片：引述外部内容时使用（正文写作 `> > 引文`）。
+   必须在此覆盖通用 blockquote 的 background，否则会被它盖掉，
+   表现为「写了深底却渲染成浅底」。 */
+.inloop-article blockquote blockquote {
+  padding: 18px 20px;
+  border-radius: 2px;
+  border-left: 3px solid var(--brand-primary);
+  background: var(--brand-dark-bg);
+}
+
+.inloop-article blockquote blockquote p {
+  color: var(--brand-dark-text);
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.inloop-article section {
+  margin-top: 36px;
+}
+
+.inloop-article section p {
+  font-size: 14px;
+}
+
+.inloop-article ul,
+.inloop-article ol {
+  margin: 0 0 24px 0;
+  padding-left: 24px;
+}
+
+.inloop-article li {
+  margin-bottom: 8px;
+  line-height: 1.75;
+}
+
+.inloop-article pre {
+  margin: 24px 0;
+}
+
+.inloop-article table {
+  margin: 24px 0;
+}
+
+.inloop-article hr {
+  margin: 32px 0;
+}
+
+.inloop-article .inloop-caption {
+  margin: -12px 0 24px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
