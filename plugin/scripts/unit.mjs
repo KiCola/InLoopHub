@@ -123,29 +123,29 @@ console.log("stripHtml（剪贴板的纯文本兜底）");
 }
 
 console.log("");
-console.log("pathToFileUrl（预览改用 src 指向真实文件）");
+console.log("pathToFileUrl 已移除；frameBaseHref 的路径转换规则（预览靠 base + srcdoc）");
 {
   check(
-    "Windows 盘符路径补三个斜杠",
-    utils.pathToFileUrl("E:\\InLoopHub\\dist\\a\\article.html") ===
-      "file:///E:/InLoopHub/dist/a/article.html",
-    utils.pathToFileUrl("E:\\InLoopHub\\dist\\a\\article.html"),
+    "Windows 盘符路径补三个斜杠并以斜杠结尾",
+    utils.frameBaseHref("E:\\InLoopHub\\dist\\a") === "file:///E:/InLoopHub/dist/a/",
+    utils.frameBaseHref("E:\\InLoopHub\\dist\\a"),
   );
   check(
     "已经是 POSIX 绝对路径时补两个斜杠",
-    utils.pathToFileUrl("/home/u/a.html") === "file:///home/u/a.html",
-    utils.pathToFileUrl("/home/u/a.html"),
+    utils.frameBaseHref("/home/u/dist/a") === "file:///home/u/dist/a/",
+    utils.frameBaseHref("/home/u/dist/a"),
   );
   check(
-    "含空格与中文的路径原样保留（由 URL 规则处理）",
-    utils.pathToFileUrl("E:/d/屏幕 截图.html") === "file:///E:/d/屏幕 截图.html",
-    utils.pathToFileUrl("E:/d/屏幕 截图.html"),
-  );
-  check(
-    "frameBaseHref 以斜杠结尾（相对路径拼接必需）",
+    "已带尾斜杠时不重复",
     utils.frameBaseHref("E:/a/b/") === "file:///E:/a/b/",
     utils.frameBaseHref("E:/a/b/"),
   );
+  check(
+    "含空格与中文的目录原样保留",
+    utils.frameBaseHref("E:/d/我的 目录") === "file:///E:/d/我的 目录/",
+    utils.frameBaseHref("E:/d/我的 目录"),
+  );
+  check("结果一定以斜杠结尾（拼接相对路径必需）", utils.frameBaseHref("E:/a").endsWith("/"));
 }
 
 rmSync(outDir, { recursive: true, force: true });

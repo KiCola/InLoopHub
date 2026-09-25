@@ -202,9 +202,15 @@ export default class InloopPlugin extends Plugin {
    */
   async activatePreview(inSidebar = false): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_INLOOP_PREVIEW);
-    const existingLeaf: WorkspaceLeaf | null = existing[0] ?? null;
 
-    let leaf: WorkspaceLeaf | null = existingLeaf;
+    // **先清掉多余的重复面板。**
+    // 曾经出现过"文章列表显示两遍"：侧边栏开过一个、分屏又开一个，
+    // 两个同类型视图各渲染一份列表，看起来像列表重复了。
+    // 面板这种东西只该有一个。
+    let leaf: WorkspaceLeaf | null = existing[0] ?? null;
+    for (const duplicate of existing.slice(1)) {
+      duplicate.detach();
+    }
 
     if (!leaf && inSidebar) {
       leaf = await this.app.workspace.ensureSideLeaf(VIEW_TYPE_INLOOP_PREVIEW, "right", {

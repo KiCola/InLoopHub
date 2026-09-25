@@ -12,7 +12,9 @@ import { STATUSES } from "./inloop/cli";
 import { readTextFile, toVaultPath } from "./obsidian-env";
 import {
   FRAME_SANDBOX,
-  pathToFileUrl,
+  extractBodyHtml,
+  frameBaseHref,
+  wrapForFrame,
 } from "./preview-utils";
 
 export const VIEW_TYPE_INLOOP_PREVIEW = "inloop-notes-preview";
@@ -52,6 +54,11 @@ export class InloopPreviewView extends ItemView {
   private statusEl: HTMLElement | null = null;
   private buildEl: HTMLElement | null = null;
   private formEl: HTMLElement | null = null;
+
+  /** 是否有渲染正在进行（防止并发渲染把同一份列表追加两遍） */
+  private rendering = false;
+  /** 渲染期间是否又有新请求（结束后补跑一次） */
+  private renderQueued = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: InloopPlugin) {
     super(leaf);
@@ -157,8 +164,39 @@ export class InloopPreviewView extends ItemView {
 
   // --- 渲染 ---------------------------------------------------------------
 
+  /**
+   * 重新渲染整个面板。
+   *
+   * **串行化 + 防重入**：`render()` 会被多处触发（打开面板、切换文件、
+   * 编辑防抖、点刷新、设置改动）。并发跑两次会让各段渲染的
+   * ``empty()`` 与 ``append`` 交错，表现为**同一份列表出现两遍**
+   * （用户实测报过"时常出现"）。
+   *
+   * 处理方式：
+   * - 若已有渲染在跑，只记下"还需要再跑一次"，等它结束后补跑（合并请求）
+   * - 已排队时不重复入队，避免无意义的连续重跑
+   */
   async render(): Promise<void> {
+    if (this.rendering) {
+      this.renderQueued = true;
+      return;
+    }
+    this.rendering = true;
+    try {
+      await this.renderOnce();
+      // 渲染期间又有请求进来：补跑一次，保证最终状态是最新的
+      while (this.renderQueued) {
+        this.renderQueued = false;
+        await this.renderOnce();
+      }
+    } finally {
+      this.rendering = false;
+    }
+  }
+
+  private async renderOnce(): Promise<void> {
     this.applyPreviewWidth();
+    // 各段写的是不同容器，可以并行；串行化由 render() 保证
     await Promise.all([this.renderArticles(), this.renderPreview(), this.renderBuildInfo()]);
   }
 
@@ -328,24 +366,23 @@ export class InloopPreviewView extends ItemView {
       const build = await this.plugin.runRaw(["build-wechat", slug]);
       const result = build as unknown as BuildResult;
       // 读一次产物，确认它真的存在且可读；失败时异常会带**真实原因**
-      readTextFile(result.html_path);
+      const html = readTextFile(result.html_path);
       busy.remove();
+      const body = extractBodyHtml(html);
 
-      // **用 src 指向真实的产物文件，而不是把 HTML 塞进 srcdoc。**
-      //
-      // 为什么改：`srcdoc` 生成的文档**没有 URL 基址**，里面相对路径的图片
-      // 依赖手动注入的 `<base href="file:///...">`。这条路在 Chrome 里实测可用，
-      // 但在 Obsidian 的 Electron 里图片不显示——`srcdoc` + `file://` 子资源
-      // 受环境策略影响，行为不如"真的导航到一个 file:// 文档"可靠。
-      //
-      // 用 src 之后：文档有真实 URL（就是产物 HTML 的 file:// 地址），
-      // 相对路径天然解析正确，**连 base 都不需要**。
-      // 顺带少一次字符串拼接与转义，预览也不会因 srcdoc 过大而失败。
       const frame = host.createEl("iframe", { cls: "inloop-frame" });
-      // sandbox 保留 allow-same-origin：产物样式全内联，不需要脚本，
-      // 也不该有机会执行脚本。
+      // **用 srcdoc，不要用 src 指向 file://。**
+      //
+      // 教训：曾为"图片不显示"改成 `src="file:///..."`，结果**整块预览变白**
+      // ——sandbox 的源隔离会拒绝 file:// 导航，连文字都没了。
+      // srcdoc 把内容内联，不需要导航，因此不受这条策略影响。
+      //
+      // sandbox 必须是 `allow-same-origin`：空串会阻止一切 file:// 子资源加载，
+      // 图片全成坏图（这条由探针实测确认）。
       frame.setAttribute("sandbox", FRAME_SANDBOX);
-      frame.setAttribute("src", pathToFileUrl(result.preview_path || result.html_path));
+      // base 指向产物目录：产物里的图片是相对路径，没有它就会相对 Obsidian 的
+      // app:// 基址解析而全部失败。
+      frame.srcdoc = wrapForFrame(body, frameBaseHref(result.output_dir));
     } catch (error) {
       busy.remove();
       const message = error instanceof Error ? error.message : String(error);
