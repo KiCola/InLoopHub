@@ -7,7 +7,7 @@ Asset Pipeline、Future Publisher Interface。
 ## 0. 一句话结构
 
 ```text
-articles/**/index.md                       ← 唯一内容源（Git 管理）
+<content_root>/**/index.md            ← 唯一内容源（默认 content/，不入库）
         │
         │  parse        （纯函数，不做校验）
         ▼
@@ -26,7 +26,7 @@ articles/**/index.md                       ← 唯一内容源（Git 管理）
                                       微信公众号
 ```
 
-数据单向流动：内容源 → 模型 → 渲染 → 产物。**没有任何一步反向写回 `articles/`。**
+数据单向流动：内容源 → 模型 → 渲染 → 产物。**没有任何一步反向写回内容目录。**
 
 ## 1. Article Model
 
@@ -131,7 +131,7 @@ dist/wechat/<slug>/
 **明确不负责**：决定正文 HTML 里的 `src` 写法。路径改写由渲染层依据清单统一完成，
 避免"复制图片"和"改写 HTML"两处各改一半。
 
-**为什么图片与文章就近管理却又要复制一份**：源文件在 `articles/.../assets/` 便于作者维护，
+**为什么图片与文章就近管理却又要复制一份**：源文件在 `<文章目录>/assets/` 便于作者维护，
 产物目录里的副本保证 `dist/` 可以整体拿走使用，不依赖仓库其他部分。
 
 ## 6. Future Publisher Interface

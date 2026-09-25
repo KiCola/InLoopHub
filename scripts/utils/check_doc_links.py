@@ -26,7 +26,6 @@ DOCUMENTS = (
     "docs/roadmap.md",
     "styles/README.md",
     "styles/themes/README.md",
-    "articles/README.md",
     "config/README.md",
     "templates/README.md",
     "scripts/README.md",

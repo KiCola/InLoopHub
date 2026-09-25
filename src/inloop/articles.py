@@ -141,7 +141,7 @@ def articles_root(content_root: Path) -> Path:
     """返回文章根目录。
 
     参数已经是**内容目录本身**（由 :meth:`Config.resolve_content_root` 解析），
-    因此这里直接返回它，不再拼接 ``articles/``——拼接会把"内容目录可以任意指定"
+    因此这里直接返回它，不再拼接目录名——拼接会把"内容目录可以任意指定"
     这件事抹掉。
     """
     return content_root

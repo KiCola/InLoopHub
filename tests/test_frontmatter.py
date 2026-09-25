@@ -17,7 +17,7 @@ from inloop.parser.frontmatter import FrontMatterError, parse_front_matter
 from inloop.rules import RULES_BY_CODE
 from tests.conftest import MINIMAL_BODY, MINIMAL_FRONT, make_article_text
 
-SOURCE = Path("articles/2026/007-test-article/index.md")
+SOURCE = Path("content/2026/007-test-article/index.md")
 
 
 def codes(text: str, source: Path | None = SOURCE) -> list[str]:
@@ -154,7 +154,7 @@ def test_正文缺一级标题给警告() -> None:
 
 def test_目录名序号与id不一致给警告() -> None:
     text = make_article_text()
-    assert "FM018" in codes(text, source=Path("articles/2026/099-test-article/index.md"))
+    assert "FM018" in codes(text, source=Path("content/2026/099-test-article/index.md"))
 
 
 def test_id报错时不再产生误导性的目录名警告() -> None:

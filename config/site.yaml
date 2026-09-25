@@ -28,12 +28,12 @@ brand:
 #   1. 命令行参数  --content <路径>
 #   2. 环境变量    INLOOP_CONTENT
 #   3. 本文件      content.root
-#   4. 兜底        工具仓库内的 articles/
+#   4. 兜底        工具仓库内的 content/
 #
 # 因此本文件可以完全不写 content 段：临时用就传 --content，
 # 本机长期用就设环境变量，开源用户则在这里配置一次。
 content:
-  # 你的内容目录。留空或删掉本行会回退到工具仓库内的 articles/。
+  # 你的内容目录。留空或删掉本行会回退到工具仓库内的 content/。
   #
   # 示例（注意 Windows 路径用正斜杠或双反斜杠，避免 YAML 转义）：
   #   root: "C:/Users/me/Nutstore/.../InLoopPub"

@@ -106,10 +106,14 @@ def external_content(tmp_path: Path) -> Path:
 # --- content_root 解析 ----------------------------------------------------
 
 
-def test_兜底到仓库内的_articles() -> None:
-    """四级都没配置时回退到 <repo>/articles，保证开箱可用。"""
+def test_兜底到仓库内的_content() -> None:
+    """四级都没配置时回退到 `<repo>/content`，保证开箱可用。
+
+    这个目录**不在版本控制里**（见 .gitignore）：文章是作者的内容，
+    不属于工具仓库的交付物。
+    """
     resolved = CONFIG.resolve_content_root()
-    assert resolved == CONFIG.root / "articles"
+    assert resolved == CONFIG.root / "content"
 
 
 def test_从真实配置文件读取_content_root(mini_repo: Path, tmp_path: Path) -> None:
@@ -118,7 +122,7 @@ def test_从真实配置文件读取_content_root(mini_repo: Path, tmp_path: Pat
     这条测试是独立审核 Agent 指出漏测后补的：原先只测了环境变量与手工构造的
     ``Config(content={"root": ""})``——后者绕过了加载流程，等于测试自己构造输入。
     结果 ``load_config`` 里"先 pop 再读"的 bug（content 段永远读到空）
-    在 180 项测试全绿的情况下漏了过去，而且**静默回退**到 ``articles/``。
+    在 180 项测试全绿的情况下漏了过去，而且**静默回退**到 ``content/``。
 
     教训：配置层的测试必须走完整的"写文件 → 加载 → 断言"路径。
     """
@@ -180,7 +184,7 @@ def test_配置里的空字符串视为未配置() -> None:
         wechat=CONFIG.wechat,
         content={"root": ""},
     )
-    assert empty.resolve_content_root() == CONFIG.root / "articles"
+    assert empty.resolve_content_root() == CONFIG.root / "content"
 
 
 def test_构建产物目录可配置(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

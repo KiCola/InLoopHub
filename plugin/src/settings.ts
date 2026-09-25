@@ -11,8 +11,12 @@ import type InloopPlugin from "./main";
 import { guessExecutable } from "./inloop/cli";
 import { vaultBasePath } from "./obsidian-env";
 
-/** 内容目录名：vault 根下的这个文件夹用来放文章 */
-export const DEFAULT_CONTENT_DIR_NAME = "InLoopPub";
+/**
+ * 内容目录名：vault 根下的这个文件夹用来放文章。
+ *
+ * 与工具仓库的兜底目录名保持一致，避免"设置里显示一个名字、CLI 找另一个"。
+ */
+export const DEFAULT_CONTENT_DIR_NAME = "content";
 
 /**
  * vault 里的工具指向文件（相对 vault 根）。

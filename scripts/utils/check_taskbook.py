@@ -80,10 +80,13 @@ def main() -> int:
     print()
 
     # 4. 过时表述
+    # 注：修订记录里出现 "示例文章原在 `articles/`" 是**正确的历史记录**，
+    # 因此这里只查会把读者引向错误路径的表述（形如 ``articles/2026/``），
+    # 而不是一律禁止 "articles" 字样。
     stale = {
         "GitHub 仓库是唯一 Source of Truth": "GitHub 仓库是唯一 Source of Truth",
         "以 GitHub 仓库为唯一内容源": "以 GitHub 仓库为唯一内容源",
-        "articles/2026/ 路径写法": "articles/2026/",
+        "把兜底内容目录写成 articles/": "articles/2026/",
         "requirements.txt": "requirements.txt",
         "索引写在 README.md": "README.md 中的文章索引",
     }

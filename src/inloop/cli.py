@@ -94,7 +94,7 @@ def main_callback(
         typer.Option(
             "--content",
             help="内容目录（放文章的地方）。默认按 INLOOP_CONTENT 环境变量、"
-            "再按 config/site.yaml 的 content.root，最后回退到仓库内的 articles/。",
+            "再按 config/site.yaml 的 content.root，最后回退到仓库内的 content/。",
         ),
     ] = None,
     as_json: Annotated[
@@ -256,7 +256,7 @@ def _content_root_source(config: Config) -> str:
         return "环境变量 INLOOP_CONTENT"
     if str(config.content.get("root") or "").strip():
         return "config/site.yaml 的 content.root"
-    return "兜底（工具仓库内的 articles/）"
+    return "兜底（工具仓库内的 content/）"
 
 
 @app.command()

@@ -27,7 +27,7 @@ CONFIG_DIR_NAME = "config"
 
 #: 未配置内容目录时的兜底位置（相对仓库根）。
 #: 保留它有两个用处：仓库自带的示例文章可直接跑通；测试不必依赖外部目录。
-DEFAULT_CONTENT_DIR = "articles"
+DEFAULT_CONTENT_DIR = "content"
 
 # 定位仓库根的标记：这些路径同时存在时，认为该目录就是仓库根。
 # 之所以不只用 pyproject.toml，是因为它在任意 Python 项目里都会出现；
@@ -193,7 +193,7 @@ class Config:
         """确定内容目录（任务书 §3.3 的解析顺序）。
 
         优先级：``override``（来自 ``--content``）> ``INLOOP_CONTENT`` 环境变量 >
-        ``config/site.yaml`` 的 ``content.root`` > ``<仓库根>/articles``。
+        ``config/site.yaml`` 的 ``content.root`` > ``<仓库根>/content``。
 
         Args:
             override: 命令行显式指定的内容目录。
@@ -224,8 +224,7 @@ class Config:
                     f"实际为 {type(configured).__name__}："
                     f"{CONFIG_DIR_NAME}/{SITE_CONFIG_NAME}\n"
                     f"修正方法：写成字符串路径，例如 `root: \"D:/我的文章\"`；"
-                    f"不想用就留空，会回退到仓库内的 {DEFAULT_CONTENT_DIR}/。"
-                )
+                    f"不想用就留空，会回退到仓库内的 {DEFAULT_CONTENT_DIR}/。"                )
             return _as_directory(
                 configured, f"{CONFIG_DIR_NAME}/{SITE_CONFIG_NAME} 的 content.root"
             )

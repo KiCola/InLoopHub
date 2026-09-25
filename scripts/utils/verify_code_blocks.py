@@ -52,14 +52,15 @@ def find_article_indexes() -> list[Path]:
 
     内容与工具解耦后，仓库里能出现文章的地方有两处：
 
-    - ``articles/``：``content_root`` 的兜底位置（本机未配置时写作落在这里）
+    - ``content/``：``content_root`` 的兜底位置（本机未配置时文章写在这里），
+      被 ``.gitignore`` 排除，因此 clone 下来通常是空的
     - ``examples/``：随仓库分发的排版示例，测试与演示用
 
     两处都扫，避免"只认一个目录"导致删掉示例后脚本还去找不存在的文件
     （这正是上一版的问题）。
     """
     found: list[Path] = []
-    for base in (REPO_ROOT / "articles", REPO_ROOT / "examples"):
+    for base in (REPO_ROOT / "content", REPO_ROOT / "examples"):
         if not base.is_dir():
             continue
         for year in sorted(p for p in base.iterdir() if p.is_dir()):
@@ -70,7 +71,7 @@ def find_article_indexes() -> list[Path]:
 def main() -> int:
     index_files = find_article_indexes()
     if not index_files:
-        print("✗ 在 articles/ 与 examples/ 下都没有找到文章")
+        print("✗ 在 content/ 与 examples/ 下都没有找到文章")
         return 1
 
     failures = 0

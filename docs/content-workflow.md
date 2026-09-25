@@ -27,7 +27,7 @@ idea ─▶ researching ─▶ draft ─▶ review ─▶ ready ─▶ published
 系统提供按文章路径修改状态的命令（任务书 §17 的 `inloop status <article> <new-status>`），
 **该命令本轮未实现**，属于任务书 §25 未列入 P0 的部分。
 
-当前修改状态的方式是直接编辑 `articles/<年份>/<slug>/index.md` 的 Front Matter。
+当前修改状态的方式是直接编辑 `<内容目录>/<年份>/<slug>/index.md` 的 Front Matter，\n或用 `inloop status <slug> <状态>`（只改 status 一行）。
 这是**唯一**允许改动已存在文章文件的场景，且改动范围仅限 `status` 一行。
 
 ## 分支策略

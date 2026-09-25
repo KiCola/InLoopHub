@@ -21,11 +21,12 @@
 
 > **第一次使用？** 三步走：
 > 1. 按下一节完成安装
-> 2. 用 `inloop info` 确认内容目录，`config/site.yaml` 的 `content.root`
->    指向你放文章的地方（详见[内容与文章索引](#内容与文章索引)）
-> 3. `inloop new` 建一篇，`inloop preview-wechat` 看效果
+> 2. `inloop new` 建一篇，`inloop preview-wechat <slug>` 看效果
+> 3. 想用界面的话装 [Obsidian 插件](#obsidian-插件)
 >
-> 仓库自带的 `articles/` 默认是空的——你的文章不在这个仓库里，这是有意的设计。
+> 不配置任何东西也能直接用：文章会写到仓库里的 `content/`，
+> 而那个目录**被 `.gitignore` 排除**，不会进版本控制。
+> 想把文章放到别处（例如坚果云 vault），见[内容与文章索引](#内容与文章索引)。
 
 ## 安装
 
@@ -100,7 +101,7 @@ inloop new --title "文章的完整标题" --slug your-slug --template paper-not
 生成结果：
 
 ```text
-articles/2026/005-your-slug/
+content/2026/005-your-slug/
 ├── index.md      ← 你要写的文件，只有它
 ├── cover.png     ← 自动生成的占位封面，发布前建议换掉
 └── assets/       ← 文章配图放这里
@@ -173,7 +174,7 @@ platforms:
 ### 3. 放图片
 
 1. 把图片文件拷进**该文章的** `assets/` 目录
-   （如 `articles/2026/005-your-slug/assets/architecture.png`）
+   （如 `content/2026/005-your-slug/assets/architecture.png`）
 2. 正文用**相对路径**引用：`![架构图](assets/architecture.png)`
 
 三条硬规矩：
@@ -319,7 +320,16 @@ inloop list      # 列出内容目录里的全部文章
 | 1 | 命令行参数 `--content <路径>` |
 | 2 | 环境变量 `INLOOP_CONTENT` |
 | 3 | `config/site.yaml` 的 `content.root` |
-| 4 | 兜底：本仓库内的 `articles/` |
+| 4 | 兜底：本仓库内的 `content/` |
+
+第 4 级是**开箱可用**的默认值：什么都不配置也能直接写文章，
+而 `content/` 被 `.gitignore` 排除，**文章不会进版本控制**。
+正式使用时建议配一个独立目录（第 1–3 级任选），把内容与工具彻底分开。
+
+> **路径里的中文要注意**：工具会在启动时强制 UTF-8 输出，
+> 因此含中文的路径（如坚果云的「我的坚果云」）不会导致乱码。
+> 但若内容目录位于**同步盘**，同步客户端可能在流量用尽等情况下锁定目录，
+> 表现为 `WinError 5 拒绝访问`——那是同步客户端的行为，与本工具无关。
 
 文章总览（`INDEX.md`）由 `inloop index` 生成在**内容目录**下，与文章放在一起。
 本仓库的 `examples/` 里是随仓库分发的排版示例，用于演示与回归验证，不是你的内容。
@@ -364,7 +374,7 @@ inloop build-wechat <文章> --theme generous     # 临时指定
 
 | 目录 | 作用 |
 |---|---|
-| `articles/` | 内容目录的**兜底**位置（通常为空，你的文章放在 `content.root` 指向处） |
+| `content/` | 内容目录的**兜底**位置（被 `.gitignore` 排除，文章不入库） |
 | `examples/` | 随仓库分发的排版示例，测试会自动遍历它们做端到端构建 |
 | `templates/` | 文章模板 |
 | `assets/` | 仓库级共享素材（Logo、通用封面等） |
