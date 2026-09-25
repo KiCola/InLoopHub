@@ -658,9 +658,12 @@ def render_wechat_html(
     body = soup.body
     inner = "".join(str(child) for child in body.children) if body else str(soup)
 
+    # 在最终序列化**之后**把代码块里的哨兵换回空格。
+    # 必须放在这一步：如果提前还原，后续任何一次解析都可能再次折叠掉缩进；
+    # 而放在最后，产物里的字符就是最终形态，没有机会再被改写。
     if not container:
         return WechatRenderResult(
-            html=inner,
+            html=_restore_code_spaces(inner),
             unstyled_tags=tuple(unstyled),
             warnings=tuple(warnings),
             numbered_headings=numbered,
@@ -674,14 +677,16 @@ def render_wechat_html(
     if container_style:
         style_attr = to_style_attribute(container_style)
         return WechatRenderResult(
-            html=f'<{ARTICLE_TAG} style="{style_attr}">{inner}</{ARTICLE_TAG}>',
+            html=_restore_code_spaces(
+                f'<{ARTICLE_TAG} style="{style_attr}">{inner}</{ARTICLE_TAG}>'
+            ),
             unstyled_tags=tuple(unstyled),
             warnings=tuple(warnings),
             numbered_headings=numbered,
             has_byline=has_byline,
         )
     return WechatRenderResult(
-        html=f"<{ARTICLE_TAG}>{inner}</{ARTICLE_TAG}>",
+        html=_restore_code_spaces(f"<{ARTICLE_TAG}>{inner}</{ARTICLE_TAG}>"),
         unstyled_tags=tuple(unstyled),
         warnings=tuple(warnings),
         numbered_headings=numbered,
@@ -1033,26 +1038,36 @@ def _build_figures(soup: BeautifulSoup, config: Config, sheet: StyleSheet) -> No
 def _apply_code_highlighting(soup: BeautifulSoup) -> None:
     """给代码块加语法着色。
 
+    实现方式：**不把 Pygments 生成的 HTML 交给解析器**，而是取它的 token 流、
+    自己拼出 span。原因是任何 HTML 解析器都会在解析阶段丢掉"换行后的连续空白"
+    （HTML 规范认为元素间的空白不重要），而代码的缩进恰恰就在那里——
+    交给解析器的结果是 `from dataclasses import` 变成 `from dataclassesimport`、
+    函数体缩进消失，代码直接变成语法错误。
+
     Pygments 不可用时什么也不做：产物依旧是可读的等宽代码块。
     """
     blocks = soup.find_all("pre")
     if not blocks:
         return
     try:
-        from pygments import highlight
-        from pygments.formatters import HtmlFormatter
+        from pygments import lex
         from pygments.lexers import TextLexer, get_lexer_by_name
+        from pygments.styles import get_style_by_name
         from pygments.util import ClassNotFound
     except ImportError:  # pragma: no cover - Pygments 是可选依赖
         return
+
+    style = get_style_by_name("default")
 
     for block in blocks:
         code = block.find("code")
         if code is None:
             continue
         text = code.get_text()
-        language = _detect_language(code)
+        if not text.strip():
+            continue
 
+        language = _detect_language(code)
         lexer = TextLexer()
         if language:
             try:
@@ -1060,34 +1075,78 @@ def _apply_code_highlighting(soup: BeautifulSoup) -> None:
             except ClassNotFound:
                 lexer = TextLexer()
 
-        formatter = HtmlFormatter(nowrap=True)
-        highlighted = highlight(text, lexer, formatter)
-        token_styles = _token_style_map(formatter)
-
-        fragment = BeautifulSoup(highlighted, "html.parser")
-        # Pygments 会为没有任何样式的 token（标点、空白）也生成 <span>。
-        # 它们保留下来只会让 HTML 变长，并制造"未匹配样式"的噪音告警，
-        # 因此先记下样式，再把空 span 解开。
-        plain_spans: list[Tag] = []
-        for span in fragment.find_all("span"):
-            classes = span.get("class") or []
-            declarations: dict[str, str] = {}
-            for name in classes:
-                declarations.update(token_styles.get(name, {}))
-            if declarations:
-                span["style"] = to_style_attribute(declarations)
-            else:
-                plain_spans.append(span)
-            # class 一律去掉：产物零 class
-            if span.has_attr("class"):
-                del span["class"]
-
-        for span in plain_spans:
-            span.unwrap()
-
+        html = _tokens_to_html(lex(text, lexer), style)
+        # 交给解析器前把空格换成哨兵：解析器会折叠连续空格，而缩进就是连续空格。
+        # HTML 由我们自己生成、结构完全可预期，因此哨兵不会与真实内容冲突。
+        fragment = BeautifulSoup(_protect_code_spaces(html), "html.parser")
         code.clear()
-        for child in list(fragment.children):
+        for child in fragment.children:
             code.append(child)
+
+
+def _tokens_to_html(tokens: object, style: object) -> str:
+    """把 Pygments 的 token 流拼成带内联样式的 HTML。
+
+    每个 token 一个 ``span``，并显式带上 ``white-space:pre``：
+    微信编辑器重写样式时不保留继承，该属性只有写在每个元素上才可靠。
+
+    所有文本逐字符保留（含缩进与空格），并做 HTML 转义——缩进在代码里是语义，
+    少一个空格就可能让示例不可运行。
+    """
+    from pygments.style import Style
+
+    # get_style_by_name 返回 Style 的**类**。style_for_token 定义在元类上，
+    # 只有类对象才有；这里统一取类来调用，并兼容传入实例的情况。
+    style_class = style if isinstance(style, type) else type(style)
+    assert issubclass(style_class, Style)
+
+    parts: list[str] = []
+
+    for token_type, value in tokens:  # type: ignore[union-attr]
+        token_style = style_class.style_for_token(token_type)
+        declarations: list[str] = []
+        if token_style.get("color"):
+            declarations.append(f"color:#{token_style['color']}")
+        if token_style.get("bold"):
+            declarations.append("font-weight:bold")
+        if token_style.get("italic"):
+            declarations.append("font-style:italic")
+        if token_style.get("underline"):
+            declarations.append("text-decoration:underline")
+
+        escaped = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+        if not declarations:
+            # 无配色的 token 也要套 span：解析器会折叠**元素之间**的连续空白，
+            # 而代码的缩进恰好就是这种空白（前一个 token 的换行之后、下一个 token 之前）。
+            # 只有把每个文本片段都放进元素里，解析器才没有裸空白可折。
+            declarations.append("white-space:pre")
+
+        parts.append(f'<span style="{";".join(declarations)};">{escaped}</span>')
+
+    return "".join(parts)
+
+
+#: 代码块中空白的临时替身。
+#:
+#: 为什么需要它：BeautifulSoup 的 ``html.parser`` 会在解析阶段
+#: **把元素内部的连续空格折叠成一个**（换行不受影响）。代码的缩进恰恰是
+#: 连续空格，于是 `from dataclasses import` 变成 `from dataclassesimport`、
+#: 函数体缩进整段消失——代码直接变成语法错误。
+#:
+#: 解法：把空格换成私有使用区字符后再交给解析器（解析器不认识它，不会折叠），
+#: 最终序列化完成后一次性还原。换行不必替换，它本身不会被折叠。
+_CODE_SPACE_SENTINEL = "\ue000"
+
+
+def _protect_code_spaces(html: str) -> str:
+    """把空格换成哨兵，避免被 HTML 解析器折叠。"""
+    return html.replace(" ", _CODE_SPACE_SENTINEL)
+
+
+def _restore_code_spaces(text: str) -> str:
+    """把哨兵换回空格。"""
+    return text.replace(_CODE_SPACE_SENTINEL, " ")
 
 
 def _detect_language(code: Tag) -> str:

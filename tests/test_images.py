@@ -9,11 +9,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from bs4 import BeautifulSoup
 from PIL import Image
 
 from inloop.assets.pipeline import SUPPORTED_SUFFIXES, image_size, prepare_images
 from inloop.config import load_config
-from inloop.normalize import ExtractedImage
+from inloop.normalize import ExtractedImage, normalize_html
+from inloop.parser.markdown import render_markdown
 from inloop.renderer.wechat import StyleError, load_stylesheet, parse_css, render_wechat_html
 
 # --- 图片尺寸解析 ---------------------------------------------------------
@@ -261,3 +263,51 @@ def test_已带内联样式的标签不算漏样式() -> None:
         stylesheet=sheet,
     )
     assert "span" not in result.unstyled_tags
+
+
+def test_代码块保留缩进与词间空格() -> None:
+    """代码块的空白必须逐字符保留。
+
+    这条回归测试来自一次真实事故：产物在自己的预览里看着正常，但粘进微信后
+    `from dataclasses import` 变成 `from dataclassesimport`、缩进整段消失，
+    示例代码直接变成语法错误。
+
+    根因：BeautifulSoup 的 html.parser 会在**解析阶段**把元素内部的连续空格
+    折叠成一个（换行不受影响），而缩进恰好就是连续空格。
+    """
+    source = (
+        "```python\n"
+        "from dataclasses import dataclass\n"
+        "class Stage:\n"
+        "    name: str\n"
+        "\n"
+        "    def digest(self) -> str:\n"
+        "        return 'x'\n"
+        "```\n"
+    )
+    html = normalize_html(render_markdown(source).html).html
+    result = render_wechat_html(
+        html, config=load_config(), stylesheet=load_stylesheet(load_config())
+    )
+    text = BeautifulSoup(result.html, "html.parser").find("pre").get_text()
+
+    assert "from dataclasses import dataclass" in text, "词间空格被折叠了"
+    indents = {
+        len(line) - len(line.lstrip(" ")) for line in text.splitlines() if line.strip()
+    }
+    assert 4 in indents and 8 in indents, f"缩进丢失，实际缩进集合 {indents}"
+    # 保护空白用的哨兵字符绝不能泄漏到产物里
+    assert "\ue000" not in result.html
+    # 保住空白不能以牺牲着色为代价
+    assert "color:#" in result.html
+
+
+def test_无语言标识的代码块同样保留缩进() -> None:
+    """没有语言标识时不语法着色，但缩进依然不能丢。"""
+    source = "```\nplain   text\n    indented\n```\n"
+    html = normalize_html(render_markdown(source).html).html
+    result = render_wechat_html(
+        html, config=load_config(), stylesheet=load_stylesheet(load_config())
+    )
+    text = BeautifulSoup(result.html, "html.parser").find("pre").get_text()
+    assert "    indented" in text, "无语言标识时缩进也不该丢"
