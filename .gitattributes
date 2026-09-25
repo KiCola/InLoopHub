@@ -15,6 +15,9 @@
 *.txt     text eol=lf
 *.gitignore text eol=lf
 
+# shell 脚本必须 LF：CRLF 会让 bash 报 `\r: command not found`
+*.sh      text eol=lf
+
 # 二进制文件不做换行转换
 *.png     binary
 *.jpg     binary

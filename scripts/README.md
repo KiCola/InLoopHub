@@ -9,6 +9,22 @@
 | `build_wechat.py` | `inloop build-wechat` |
 | `generate_index.py` | `inloop index` |
 
+## activate.sh —— 激活虚拟环境（供 bash 系 shell）
+
+```bash
+source scripts/activate.sh
+```
+
+**必须用 `source`**（或 `.`），否则改动的 PATH 只作用于子进程，退出即失效——
+这正是 `inloop: command not found` 最常见的原因。
+
+虚拟环境自带的 `.venv/Scripts/activate` 本身没有问题，`source` 它同样有效。
+本脚本的额外价值是**按当前平台习惯设置 PATH 并把结果报告出来**
+（激活了哪个环境、版本号、可用的命令形式），省去"我到底激活成功没有"的猜测。
+
+Windows 上 `python -m venv` 生成的是 `Scripts/inloop.exe`，Linux/macOS 生成的是
+`bin/inloop`，本脚本会自动识别。
+
 ## utils/ —— 开发辅助脚本
 
 `utils/` 下是**开发期**用的工具，不属于发布链路，也不发布给最终用户：

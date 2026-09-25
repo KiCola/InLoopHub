@@ -24,21 +24,53 @@ cd InLoopHub
 
 # 建议使用虚拟环境
 python -m venv .venv
-# Windows: .venv\Scripts\activate      Linux/macOS: source .venv/bin/activate
-
 pip install -e ".[dev]"
 inloop --help
 ```
 
-以后每次写作只需要进入目录并激活虚拟环境：
+### 激活虚拟环境
+
+不同 shell 的写法**不一样**，写错会表现为 `inloop: command not found`：
+
+| Shell | 命令 |
+|---|---|
+| Windows CMD | `.venv\Scripts\activate.bat` |
+| Windows PowerShell | `.venv\Scripts\Activate.ps1` |
+| **Git Bash / MSYS2 / WSL** | `source .venv/Scripts/activate`（**必须带 `source`**） |
+| Linux / macOS | `source .venv/bin/activate` |
+
+Git Bash 用户的三个常见坑：
+
+1. **漏掉 `source`。** 直接运行 `.venv/Scripts/activate` 是在子进程里执行，
+   退出后 PATH 恢复原样，`inloop` 依旧找不到。
+2. **用反斜杠。** bash 把 `\` 当转义符，`.venv\Scripts\inloop.exe` 会变成
+   `.venvScriptsinloop.exe`。bash 里一律用 `/`。
+3. **路径写成 `E:\InLoopHub`。** 在 bash 里应写 `/e/InLoopHub`。
+
+**最省事的办法：不激活，直接用完整路径。** 这对任何 shell 都成立：
 
 ```bash
-cd InLoopHub
-.venv\Scripts\activate          # Windows
-source .venv/bin/activate       # Linux/macOS
+.venv/Scripts/inloop.exe check 005-practice-run     # Git Bash / CMD（显式 .exe）
+.venv/Scripts/inloop check 005-practice-run         # Git Bash 会自动补 .exe
+.venv/bin/inloop check 005-practice-run             # Linux / macOS
 ```
 
-> 不激活也能用：把命令写成 `.venv\Scripts\inloop.exe <命令>` 即可。
+验证激活是否生效：
+
+```bash
+echo $PATH | tr ':' '\n' | grep -i inloophub        # 有输出即为已激活
+```
+
+### 已经 `source` 了但还是找不到命令？
+
+多半是 PATH 被写成了 Windows 形式（`E:\...\.venv\Scripts`），bash 认不出来。
+本仓库提供一个辅助脚本，按当前平台的习惯重新设置并明确报告结果：
+
+```bash
+source scripts/activate.sh
+```
+
+它只做"设 PATH + 报告状态"，不改变任何项目行为。
 
 ## 怎么用
 
@@ -242,7 +274,7 @@ git push
 
 <!-- inloop:index:begin -->
 
-共 4 篇。
+共 5 篇。
 
 | ID | 日期 | 栏目 | 标题 | 状态 | 标签 |
 |---|---|---|---|---|---|
@@ -250,6 +282,7 @@ git push
 | 002 | 2026-09-25 | 论文拆解 | [Light-O1：20Hz 人形基础模型到底意味着什么](articles/2026/002-light-o1/index.md) | review | Humanoid、Robot Learning、Foundation Model |
 | 003 | 2026-09-23 | 实验日志 | [RoboDojo 复现记录：从数据集到可训练策略](articles/2026/003-robodojo/index.md) | review | 复现、数据集、模仿学习 |
 | 004 | 2026-09-24 | 源码深挖 | [G1 抓取任务复盘：一次失败的策略与三条可用的经验](articles/2026/004-g1-reaching/index.md) | draft | 抓取、Sim2Real、调试 |
+| 005 | 2026-09-25 | 研究随想 | [示例：我的实战练习](articles/2026/005-practice-run/index.md) | draft | 练习 |
 
 <!-- inloop:index:end -->
 
