@@ -68,6 +68,9 @@ inloop --help
 > **当前状态**：仓库处于第一阶段早期。可用命令只有 `inloop version`、`inloop info`、
 > `inloop root`；`new` / `check` / `build-wechat` / `preview-wechat` / `index`
 > 尚未实现，会在对应模块完成后逐条接入。构建与发布流程见 `docs/publishing-guide.md`。
+>
+> 底层已可用：front matter 解析与文章模型（`inloop.parser.frontmatter`、
+> `inloop.models.article`）已实现，包含字段校验与规则码，但尚未接入命令行。
 
 ## 免责声明
 

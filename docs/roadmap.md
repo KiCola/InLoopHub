@@ -8,10 +8,10 @@
 
 | # | 内容 | 状态 |
 |---|---|---|
-| 1 | 仓库初始化 | 本轮完成 |
-| 2 | Markdown 规范 | 待办 |
-| 3 | Front Matter Parser | 待办 |
-| 4 | Article Model | 待办 |
+| 1 | 仓库初始化 | 完成 |
+| 2 | Markdown 规范 | 部分：front matter 规范按任务书 §4 落实为可校验规则；正文格式约定待渲染环节落地 |
+| 3 | Front Matter Parser | 完成 |
+| 4 | Article Model | 完成 |
 | 5 | `inloop new` | 待办 |
 | 6 | `inloop check` | 待办 |
 | 7 | Markdown → HTML | 待办 |
