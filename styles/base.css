@@ -170,6 +170,8 @@
 
 .inloop-article blockquote blockquote {
   background: var(--brand-dark-bg);
+  /* 深色底上克莱茵蓝对比度不足，竖线改用中性浅灰，在深底上才看得见 */
+  border-left-color: #4b5563;
 }
 
 .inloop-article blockquote blockquote p {

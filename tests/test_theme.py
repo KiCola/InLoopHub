@@ -89,25 +89,33 @@ def test_主题覆盖基础样式() -> None:
     )
 
 
-def test_默认主题取_紧凑的标题与标准的卡片() -> None:
-    """inloop 主题是两套候选的合成，这里固定住这个组合。
+def test_默认主题的标题与卡片形态() -> None:
+    """固定住默认主题的关键形态，避免改样式时无意改掉已选定的观感。
 
-    - 标题：主色下划线（取自 compact）
-    - 浅底卡片：圆角且无左侧竖线（取自 standard）
+    - 一级标题：主色下划线
+    - 二级标题：浅蓝底框
+    - 浅底卡片：圆角 + 左侧主色竖线
     """
-    body = normalize_html(render_markdown("# 标题\n\n> 卡片\n").html).html
+    body = normalize_html(
+        render_markdown("# 一级\n\n## 二级\n\n> 卡片\n").html
+    ).html
     html = render_wechat_html(
         body, config=CONFIG, stylesheet=load_stylesheet(CONFIG, "inloop")
     ).html
 
     h1 = re.search(r"<h1 style=\"([^\"]*)\"", html)
     assert h1 is not None
-    assert "border-bottom" in h1.group(1), "默认主题的标题应带下划线"
+    assert "border-bottom" in h1.group(1), "一级标题应带下划线"
+
+    h2 = re.search(r"<h2 style=\"([^\"]*)\"", html)
+    assert h2 is not None
+    assert "background" in h2.group(1), "二级标题应带浅色底框"
+    assert "border-radius" in h2.group(1), "二级标题底框应为圆角"
 
     card = re.search(r"<blockquote style=\"([^\"]*)\"", html)
     assert card is not None
-    assert "border-radius" in card.group(1), "默认主题的卡片应为圆角"
-    assert "border-left" not in card.group(1), "默认主题的卡片不应有左侧竖线"
+    assert "border-radius" in card.group(1), "卡片应为圆角"
+    assert "border-left" in card.group(1), "卡片应带左侧主色竖线"
 
 
 def test_未知主题报出可用清单() -> None:

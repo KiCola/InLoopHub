@@ -2,14 +2,15 @@
    主题 · inloop（本项目默认）
    ==========================================================================
 
-   这是综合选定的主题，由两套候选合成：
+   这是综合选定的主题：
 
-   - **标题与正文节奏取自候选 A（紧凑）**：主色数字 + 标题，下方 2px 主色下划线；
-     行高 1.75、段间距 24px。观感控制感强，适合技术内容。
-   - **卡片外形取自候选 B（标准）**：浅底圆角、大内距、无左侧竖线。
+   - **一级标题**：主色数字 + 标题，下方 2px 主色下划线
+   - **二级标题**：浅蓝底框 + 主色文字（编号仍写在标题里）
+   - **正文节奏**：行高 1.75、段间距 24px
+   - **卡片**：浅底圆角 + 左侧主色竖线
 
    两种卡片仍然互斥：
-   - `> 内容`   → 浅底圆角卡片
+   - `> 内容`   → 浅底圆角卡片 + 主色左竖线
    - `> > 内容` → 深底圆角卡片（引述外部内容）
 
    若要调整具体数值，改本文件即可；共用颜色在 styles/base.css。
@@ -38,9 +39,13 @@
   color: var(--brand-text);
 }
 
-/* 二级标题：主色数字 + 标题，无额外装饰 */
+/* 二级标题：浅蓝底框 + 主色文字。
+   左右两侧留出内距，圆角与卡片保持同一套视觉语言。 */
 .inloop-article h2 {
   margin: 32px 0 18px 0;
+  padding: 10px 16px;
+  border-radius: 6px;
+  background: var(--brand-primary-soft);
   font-size: 17px;
   line-height: 1.45;
   font-weight: 700;
@@ -61,10 +66,11 @@
   color: var(--brand-secondary-text);
 }
 
-/* 浅底圆角卡片（候选 B 的形式）：大内距、无左竖线 */
+/* 浅底圆角卡片 + 左侧主色竖线 */
 .inloop-article blockquote {
   margin: 28px 0;
   padding: 20px 22px;
+  border-left: 3px solid var(--brand-primary);
   border-radius: 8px;
 }
 
@@ -79,10 +85,12 @@
 }
 
 /* 深底圆角卡片：引述外部内容时使用（正文写作 `> > 引文`）。
-   必须在此覆盖通用 blockquote 的内距与圆角，颜色由 base.css 统一。 */
+   这里必须把 border-left 一并写全：只写 background 会让浏览器的简写重置
+   base.css 里设置的 border-left-color，结果是深底上的竖线仍用主色、几乎看不见。 */
 .inloop-article blockquote blockquote {
   padding: 20px 22px;
   border-radius: 8px;
+  border-left: 3px solid #4b5563;
   background: var(--brand-dark-bg);
 }
 
