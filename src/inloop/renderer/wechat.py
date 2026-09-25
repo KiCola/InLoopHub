@@ -1156,27 +1156,3 @@ def _detect_language(code: Tag) -> str:
         if isinstance(name, str) and name.startswith("language-"):
             return name[len("language-") :]
     return ""
-
-
-def _token_style_map(formatter: object) -> dict[str, dict[str, str]]:
-    """把 Pygments 的样式表解析成 token class → 声明。"""
-    from pygments.formatters import HtmlFormatter
-
-    assert isinstance(formatter, HtmlFormatter)
-    css = formatter.get_style_defs()
-    try:
-        sheet = parse_css(css)
-    except StyleError:
-        # 语法着色样式解析失败不应影响正文构建
-        return {}
-
-    mapping: dict[str, dict[str, str]] = {}
-    for selector, declarations in sheet.rules:
-        # Pygments 生成的形如 `.highlight .k`、`.k`；取最后一段作为 token 类名
-        parts = selector.split()
-        if not parts:
-            continue
-        token = parts[-1].lstrip(".")
-        if token:
-            mapping.setdefault(token, {}).update(declarations)
-    return mapping
