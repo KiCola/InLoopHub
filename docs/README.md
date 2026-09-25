@@ -1,8 +1,10 @@
 # docs —— 开发文档
 
+> **"怎么用"写在 [README](../README.md#怎么用) 里**，不在本目录重复。
+
 | 文件 | 内容 |
 |---|---|
-| `getting-started.md` | **上手走查**：从新建文章到粘贴进公众号，照着做即可 |
+| `getting-started.md` | 上手补遗：首次配置、命令执行位置、建议的写作节奏（完整用法见 README） |
 | `architecture.md` | Article Model、Parser、Renderer、Wechat Adapter、Asset Pipeline、发布接口的架构说明（任务书 §29 指定必须解释这六项） |
 | `content-workflow.md` | 从 idea 到 published 的内容工作流（任务书 §17） |
 | `publishing-guide.md` | 构建产物如何复制进微信公众号后台的逐步操作（任务书 §18） |
