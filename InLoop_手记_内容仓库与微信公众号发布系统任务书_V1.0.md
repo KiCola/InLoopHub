@@ -1,10 +1,27 @@
 # InLoop 手记内容仓库与微信公众号发布系统任务书 V1.0
 
+> **修订记录**
+>
+> 本文档在开发过程中按实际决定修订，保持"当前事实描述"的唯一性——
+> 不保留"已废弃条款 + 批注"的双份信息。
+>
+> | 日期 | 修订内容 | 原因 |
+> |---|---|---|
+> | 2026-09-25 | §1、§2、§3：内容源由"GitHub 仓库"改为"内容目录"；项目结构改为"工具仓库 + 独立内容目录"两段式 | 作者决定把文章放在自己的 Obsidian 仓库（坚果云同步、不纳入 Git），工具单独开源 |
+> | 2026-09-25 | §23：取消 GitHub Actions | 作者决定不引入 CI；本地 `ruff` + `pytest` + `inloop check` 已足够 |
+> | 2026-09-25 | §25：P1 第 15 项标注为已取消 | 同上 |
+> | 2026-09-25 | §27、§28：示例路径与文章编号更新为实际值；示例文章定位由"第一批真实文章"改为"排版回归样本" | 内容已迁出工具仓库；原编号中的 004/005 已删除 |
+> | 2026-09-25 | §29：交付物清单同步取消 Actions | 同上 |
+
 ## 1. 项目名称
 
 **InLoop Notes Publishing System**
 
-目标：构建一个以 GitHub 仓库为唯一内容源的个人技术内容管理与发布系统。
+目标：构建一个**内容源与工具解耦**的个人技术内容管理与发布系统。
+
+**内容源是一份"内容目录"，不是某个特定仓库。** 它可以位于任意位置——本机任意路径、
+Obsidian 仓库内、坚果云等同步目录，或者一个独立的 Git 仓库。工具本身单独开源，
+不要求用户把文章放进工具仓库。
 
 第一阶段仅支持：
 
@@ -20,7 +37,7 @@
 
 系统必须遵循以下原则：
 
-- GitHub 仓库是唯一 Source of Truth
+- **内容目录是唯一事实源**（不限定它是不是 Git 仓库）
 - 所有文章以 Markdown 存储
 - 一篇文章对应一个独立目录
 - 图片与文章就近管理
@@ -40,32 +57,30 @@
 
 ## 3. 推荐仓库结构
 
+系统由**两个互不耦合的部分**组成：工具仓库（开源、可升级、可替换）与内容目录（作者的长期资产）。
+
+### 3.1 工具仓库
+
 ```text
-inloop-notes/
+inloop-notes/                    # 工具本身，开源
 ├── README.md
 ├── LICENSE
 ├── .gitignore
 ├── pyproject.toml
-├── requirements.txt
 ├── config/
-│   ├── site.yaml
+│   ├── site.yaml                # 含 content.root：指向内容目录
 │   └── wechat.yaml
 │
-├── articles/
+├── examples/                    # 排版回归样本（非作者的真实文章）
 │   └── 2026/
 │       ├── 001-hello-inloop/
 │       │   ├── index.md
 │       │   ├── cover.png
 │       │   └── assets/
-│       │
 │       └── 002-light-o1/
 │           ├── index.md
 │           ├── cover.png
 │           └── assets/
-│
-├── drafts/
-│   ├── ideas.md
-│   └── unfinished/
 │
 ├── templates/
 │   ├── article.md
@@ -74,11 +89,8 @@ inloop-notes/
 │   ├── research-note.md
 │   └── diary.md
 │
-├── assets/
+├── assets/                      # 仓库级共享素材
 │   ├── brand/
-│   │   ├── logo.png
-│   │   ├── logo-no-text.png
-│   │   └── avatar.png
 │   ├── covers/
 │   └── common/
 │
@@ -89,11 +101,12 @@ inloop-notes/
 │   ├── generate_index.py
 │   └── utils/
 │
-├── styles/
-│   ├── wechat.css
-│   └── code.css
+├── styles/                      # 样式事实源，构建时内联
+│   ├── base.css
+│   ├── code.css
+│   └── themes/
 │
-├── dist/
+├── dist/                        # 构建产物，可随时删除重建（不入 Git）
 │   ├── wechat/
 │   └── metadata/
 │
@@ -104,6 +117,36 @@ inloop-notes/
     ├── style-guide.md
     └── roadmap.md
 ```
+
+### 3.2 内容目录
+
+内容目录的路径由 `content_root` 决定，**可以位于任意位置**：
+
+```text
+<content_root>/                  # 例如 Obsidian 仓库内的某个文件夹
+├── INDEX.md                     # 文章总览，由 `inloop index` 维护
+└── 2026/
+    ├── 001-hello-inloop/
+    │   ├── index.md
+    │   ├── cover.png
+    │   └── assets/
+    └── 002-light-o1/
+        ├── index.md
+        ├── cover.png
+        └── assets/
+```
+
+### 3.3 content_root 的解析顺序
+
+| 优先级 | 来源 | 用途 |
+|---|---|---|
+| 1 | `--content <路径>` 命令行参数 | 插件/脚本按当前上下文传入 |
+| 2 | `INLOOP_CONTENT` 环境变量 | 本机固定配置，免去每次传参 |
+| 3 | `config/site.yaml` 的 `content.root` | 开源用户的默认配置 |
+| 4 | `<工具仓库>/articles` | 兜底，保证未配置时仍可运行 |
+
+**为什么要解耦**：文章是长期资产，工具是可替换的。绑在一起会导致升级工具要动内容、
+别人想用工具得先 fork 文章、文章历史里混着工具代码的提交噪音。
 
 ---
 
@@ -322,7 +365,7 @@ slug
 自动生成：
 
 ```text
-articles/2026/003-example/
+2026/003-example/
 ├── index.md
 ├── assets/
 └── cover.png placeholder
@@ -339,7 +382,7 @@ inloop new --template build-log
 ### 7.2 检查文章
 
 ```bash
-inloop check articles/2026/002-light-o1
+inloop check 002-light-o1
 ```
 
 检查：
@@ -372,7 +415,7 @@ ERROR
 核心命令：
 
 ```bash
-inloop build-wechat articles/2026/002-light-o1
+inloop build-wechat 002-light-o1
 ```
 
 输入：
@@ -630,23 +673,24 @@ http://localhost:8000
 inloop index
 ```
 
-自动扫描：
+自动扫描（`<content_root>` 由 §3.3 的规则解析）：
 
 ```text
-articles/**
+<content_root>/**
 ```
 
 生成：
 
 ```text
-README.md 中的文章索引
+<content_root>/INDEX.md 中的文章索引区块
 ```
 
-或：
+**为什么是 `INDEX.md` 而不是工具仓库的 README**（2026-09-25 修订）：
+索引描述的是**内容**，内容迁出工具仓库后，索引也应跟随内容——
+作者打开自己的内容目录就能看到文章总览；工具仓库的 README 不再列举作者的文章。
 
-```text
-dist/metadata/articles.json
-```
+程序只替换标记 `<!-- inloop:index:begin -->` 与 `<!-- inloop:index:end -->`
+之间的区块，文件其余部分属于作者，程序不得改动。
 
 内容包括：
 
@@ -754,6 +798,10 @@ check
 ↓
 微信公众号后台
 ↓
+逐张上传正文图片          ← 见下方「实测结论」
+↓
+填标题 / 作者 / 摘要，上传封面
+↓
 人工预览
 ↓
 人工发布
@@ -762,6 +810,25 @@ check
 原因：
 
 > 保留最终人工审核环节，避免格式、图片、封面和链接异常。
+
+### 实测结论（2026-09-25，在真实文章上验证）
+
+| 项 | 结论 |
+|---|---|
+| 本地相对路径图片经粘贴 | **不会**自动上传。编辑器读不到本机文件，该位置为空 |
+| 外链图片（如 GitHub raw） | **不抓取**。粘贴后只显示成一串 URL 文字 |
+| 微信官方素材接口 | 需要 AppID/AppSecret，且**必须在后台把发起请求的 IP 加入白名单** |
+| 样式是否保留 | **保留良好**：标题底框、卡片、代码着色、图注、表格均正常 |
+| 代码块空白 | 已修复（此前会丢缩进与词间空格，导致示例代码不可运行） |
+
+**推论**：
+
+1. **正文图片只能在编辑器里逐张手动上传**，这是 V1 的硬约束，
+   因此构建产物必须提供**图片顺序清单**（哪张图在哪一节内），降低人工成本。
+2. 微信编辑器**不是 Markdown 渲染器**，不解析 `**加粗**`、`![图](网址)` 等语法；
+   发布指南必须写明这一点。
+3. 将来若要自动化图片环节，前置条件是：拿到 AppID/AppSecret，
+   并且有一台 **IP 固定**的机器发起上传请求。
 
 ---
 
@@ -897,25 +964,17 @@ tests/
 
 ## 23. GitHub Actions
 
-实现基础 CI：
+**本节已取消（2026-09-25）。**
 
-```text
-push / PR
-↓
-ruff
-↓
-pytest
-↓
-article validation
-```
+原计划实现基础 CI（`push / PR → ruff → pytest → article validation`）。
+作者决定不引入，理由：
 
-如果文章存在错误：
+- 内容已迁出工具仓库，CI 无法覆盖作者的真实文章
+- 本地检查已足够：`ruff check .`、`pytest`、`inloop check --all`
+- 为个人项目维护 CI 配置与 runner 环境不划算
 
-> CI fail
-
-如果只是 warning：
-
-> CI pass but report warning
+**将来若重新需要**（例如接受外部贡献），本节内容可直接复用：
+`ruff` → `pytest` → 文章校验，文章有 ERROR 则 fail，只有 WARNING 则 pass 并报告。
 
 ---
 
@@ -970,7 +1029,7 @@ draft/light-o1
 12. metadata.json
 13. 模板系统
 14. Rich CLI
-15. GitHub Actions
+15. ~~GitHub Actions~~ **已取消**（见 §23）
 16. pytest
 
 ### P2
@@ -1012,7 +1071,7 @@ draft/light-o1
 
 ## 27. 验收标准
 
-完成后，我应该能执行：
+完成后，我应该能执行（`<content_root>` 由 §3.3 的规则解析）：
 
 ```bash
 git clone ...
@@ -1022,11 +1081,11 @@ pip install -e .
 
 inloop new --template paper-note
 
-inloop check articles/2026/001-example
+inloop check 001-example
 
-inloop build-wechat articles/2026/001-example
+inloop build-wechat 001-example
 
-inloop preview-wechat articles/2026/001-example
+inloop preview-wechat 001-example
 ```
 
 并获得：
@@ -1047,7 +1106,7 @@ dist/wechat/<slug>/article.html
 复制至微信公众号后台后，要求：
 
 - 标题层级正常
-- 图片正常
+- 图片正常（**注意：图片需在编辑器中逐张手动上传，详见 §18**）
 - 代码正常
 - 表格可读
 - 引用正常
@@ -1059,14 +1118,22 @@ dist/wechat/<slug>/article.html
 
 ## 28. 第一批真实文章
 
-开发时不要全部用 lorem ipsum，直接准备真实 fixture：
+开发时不要全部用 lorem ipsum，需要准备覆盖各种写法的真实中文技术文章。
+
+**定位变更（2026-09-25）**：这批文章原先既是"作者的第一批真实文章"，
+也是"排版回归样本"。内容迁出工具仓库后，它们**归入 `examples/`，只作为排版回归样本**——
+作者的真实文章位于 `content_root`，不属于工具仓库。
+
+当前实际的示例文章：
 
 ```text
-001-hello-inloop
-002-light-o1
-003-robodojo
-004-g1-reaching
+examples/2026/
+├── 001-hello-inloop      开篇，含代码块与外链
+├── 002-light-o1          论文拆解，含公式降级、表格、深浅卡片
+└── 003-robodojo          实验日志，含多行代码块、表格、图片
 ```
+
+（原编号中的 `004-g1-reaching`、`005-practice-run` 已由作者删除。）
 
 至少用一篇真实中文技术文章测试：
 
@@ -1081,6 +1148,10 @@ dist/wechat/<slug>/article.html
 
 否则很容易出现“测试页面很好看，真正技术文章一塌糊涂”。
 
+**作者自己的文章如何校验**：示例文章只能覆盖已知写法。作者的真实文章位于
+`content_root`，需要用 `inloop check --all` 主动校验——
+工具测试跑的是 `examples/`，覆盖不到作者的实际内容。
+
 ---
 
 ## 29. 最终交付物
@@ -1092,13 +1163,14 @@ dist/wechat/<slug>/article.html
 README
 CLI
 模板
-示例文章
+示例文章（位于 examples/，见 §28）
 测试
-GitHub Actions
 Wechat CSS
 构建后的示例 HTML
 开发文档
 ```
+
+**GitHub Actions 已取消**（见 §23），不再属于交付物。
 
 并在：
 
