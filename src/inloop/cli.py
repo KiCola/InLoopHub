@@ -1395,6 +1395,35 @@ def _replace_status_line(text: str, new_value: str) -> tuple[str, bool]:
     return text, False
 
 
+def _force_utf8_output() -> None:
+    """把标准输出/错误强制为 UTF-8。
+
+    **为什么必须在程序内部做，而不是靠调用方设环境变量**：
+
+    中文 Windows 上 Python 的默认标准输出编码取自系统 locale（本机是 cp936）。
+    此时只要输出里出现非 GBK 能表示的内容——最典型的是**含中文的文件路径**——
+    写出的字节就不是 UTF-8。而调用方（编辑器插件）按 UTF-8 解码，
+    于是报错信息变成 `�ҵļ����` 这样的乱码，**用户完全无法定位问题**。
+
+    `--json` 的契约是"stdout 上有一份机器可读的 JSON"。这个契约
+    **不能依赖调用方恰好设对了 `PYTHONIOENCODING`**——那是把工具的缺陷
+    转嫁给调用方（AGENTS.md §4：边界处做输入校验、错误信息要能定位）。
+
+    实测：本机不设变量时 Node 调用确实得到乱码；设了就正常。
+    在程序内部强制之后，无需调用方配合也能正确。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            # 输出被重定向到不支持重配置的对象时忽略：
+            # 这不该导致命令失败，最坏情况是退回平台默认编码。
+            pass
+
+
 def _run() -> None:
     """CLI 入口，含**兜底异常处理**。
 
@@ -1409,6 +1438,7 @@ def _run() -> None:
     注意：这**不是**用来掩盖错误的——`_fail` 已覆盖的分支仍走各自的精确错误码，
     这里只兜住"我们没想到的情况"。
     """
+    _force_utf8_output()
     try:
         app()
     except (typer.Exit, SystemExit):

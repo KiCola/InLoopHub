@@ -14,7 +14,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -239,6 +241,76 @@ def test_内容目录没有配好时给出可判断的错误码(tmp_path: Path) 
     data = json.loads(result.stdout)
     assert data["ok"] is False
     assert data["error"]["code"] == "content_root_missing"
+
+
+def test_中文路径下输出仍是合法_UTF8(tmp_path: Path) -> None:
+    """`--json` 的契约是"机器可读"，不能依赖调用方设对环境变量。
+
+    中文 Windows 上 Python 默认用 cp936 写 stdout。若输出里含中文路径
+    （例如坚果云用户的「我的坚果云」），写出的字节就不是 UTF-8，
+    而调用方按 UTF-8 解码 → 报错信息变乱码、用户无法定位。
+    这个 bug 真出现过：用户截图里的报错是 `�ҵļ����`。
+
+    因此 CLI 在 `_run()` 里强制 stdout/stderr 为 UTF-8。
+    这条测试**绕过 CliRunner**（它会替换 stdout），直接跑真实进程，
+    并且**故意不设** PYTHONIOENCODING。
+    """
+    chinese_dir = tmp_path / "我的坚果云" / "内容"
+    directory = chinese_dir / "2026" / "001-中文"
+    (directory / "assets").mkdir(parents=True)
+    Image.new("RGB", (1175, 500), (0, 47, 167)).save(directory / "cover.png")
+    (directory / "index.md").write_text(
+        "---\n"
+        "id: 1\n"
+        'title: "中文路径测试"\n'
+        'slug: "zhongwen"\n'
+        "date: 2026-09-25\n"
+        'author: "测试作者"\n'
+        'category: "paper"\n'
+        'status: "draft"\n'
+        "tags:\n"
+        "  - 测试\n"
+        'summary: "摘要。"\n'
+        'cover: "cover.png"\n'
+        "platforms:\n"
+        "  wechat: true\n"
+        "---\n\n# 中文路径测试\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    executable = REPO_ROOT / ".venv" / "Scripts" / "inloop.exe"
+    if not executable.is_file():
+        pytest.skip("找不到虚拟环境里的 inloop（本测试需要真实进程）")
+
+    env = {
+        k: v for k, v in os.environ.items() if k not in {"PYTHONIOENCODING", "PYTHONUTF8"}
+    }
+    env["INLOOP_ROOT"] = str(REPO_ROOT)
+
+    completed = subprocess.run(
+        [str(executable), "--json", "--content", str(chinese_dir), "list"],
+        capture_output=True,
+        env=env,
+        timeout=60,
+        cwd=REPO_ROOT,
+    )
+
+    # 直接看原始字节，不让解码容忍错误
+    raw = completed.stdout
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        pytest.fail(
+            f"stdout 不是合法 UTF-8：{exc}\n"
+            f"说明 CLI 没有强制 UTF-8 输出，中文路径会被调用方解成乱码。\n"
+            f"原始字节（前 120）：{raw[:120]!r}"
+        )
+
+    assert "我的坚果云" in text, f"中文路径在输出里损坏了：{text[:200]}"
+    payload = json.loads(text)
+    assert payload["ok"] is True
+    assert payload["content_root"].endswith("我的坚果云/内容"), payload["content_root"]
 
 
 def test_传入年份目录时给出结构性提示() -> None:

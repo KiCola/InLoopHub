@@ -219,6 +219,17 @@ export async function runCli<T extends Envelope>(
     env.INLOOP_ROOT = options.repoRoot;
   }
 
+  // **必须显式指定 UTF-8。**
+  // 中文 Windows 上 Python 的默认标准输出编码是 GBK（本机 locale 是
+  // Chinese (Simplified)_China.936）。文章路径里只要出现中文
+  // （例如坚果云的「我的坚果云」），Python 写出的字节就不是 UTF-8，
+  // 而 Node 按 UTF-8 解码 → 报错信息变成乱码，无法定位。
+  //
+  // 同时设 PYTHONUTF8 覆盖文件系统与命令行参数的编码，
+  // 避免中文路径在传参环节被按 GBK 处理。
+  env.PYTHONIOENCODING = "utf-8";
+  env.PYTHONUTF8 = "1";
+
   let stdout: string;
   let stderr: string;
   try {
@@ -229,6 +240,8 @@ export async function runCli<T extends Envelope>(
         timeout: quick ? QUICK_TIMEOUT_MS : TIMEOUT_MS,
         maxBuffer: 32 * 1024 * 1024,
         windowsHide: true,
+        // 显式指定解码方式，不依赖平台默认值
+        encoding: "utf8",
         env,
       },
     );
