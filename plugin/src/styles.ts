@@ -160,11 +160,18 @@ const CSS = `
   overflow: hidden;
   background: #fff;
 }
+/*
+ * 预览区。
+ *
+ * 高度给得比较足（70vh，最低 400px）：产物里第一张图往往就在正文开头，
+ * 而截图类图片渲染后可能高达 700px——预览区太矮会让人以为"图片没显示"，
+ * 实际只是被裁在可视区之外。iframe 内部自己可滚，长文章能一路看下去。
+ */
 .inloop-frame {
   display: block;
   width: 100%;
-  height: 46vh;
-  min-height: 260px;
+  height: 70vh;
+  min-height: 400px;
   border: none;
   background: #fff;
 }

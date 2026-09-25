@@ -60,8 +60,14 @@ export default class InloopPlugin extends Plugin {
 
     this.addCommand({
       id: "open-panel",
-      name: "打开 InLoop 面板",
+      name: "打开面板（左右分屏）",
       callback: () => void this.activatePreview(),
+    });
+
+    this.addCommand({
+      id: "open-panel-sidebar",
+      name: "打开面板（右侧边栏，窄）",
+      callback: () => void this.activatePreview(true),
     });
 
     this.addCommand({
@@ -184,15 +190,23 @@ export default class InloopPlugin extends Plugin {
 
   // --- 预览 ---------------------------------------------------------------
 
-  async activatePreview(): Promise<void> {
-    // **面板要开在右侧边栏**，不能占主编辑区。
-    // 用 getLeaf(false) 会在主区新开标签页，把用户的笔记挤走——
-    // 而用户要的是"左边编辑、右边看预览"。
+  /**
+   * 打开预览面板。
+   *
+   * **默认开在中间工作区的右侧**（左右分屏），而不是侧边栏——
+   * 用户要的是"左边写文档、右边看预览"，两块都在主工作区里并排，
+   * 预览才有足够的宽度看到真实排版。侧边栏太窄，看排版没有意义。
+   *
+   * Args:
+   *   inSidebar: 为 true 时开在右侧边栏（窄），供只需要"瞄一眼"的场合用。
+   */
+  async activatePreview(inSidebar = false): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_INLOOP_PREVIEW);
-    let leaf: WorkspaceLeaf | null = existing[0] ?? null;
+    const existingLeaf: WorkspaceLeaf | null = existing[0] ?? null;
 
-    if (!leaf) {
-      // ensureSideLeaf 是 1.7.2+ 的官方 API，语义明确（getRightLeaf 已废弃）
+    let leaf: WorkspaceLeaf | null = existingLeaf;
+
+    if (!leaf && inSidebar) {
       leaf = await this.app.workspace.ensureSideLeaf(VIEW_TYPE_INLOOP_PREVIEW, "right", {
         active: true,
         reveal: true,
@@ -200,8 +214,18 @@ export default class InloopPlugin extends Plugin {
     }
 
     if (!leaf) {
+      // 在主工作区**右侧分割**出一个新面板。
+      // createLeafBySplit 的方向参数是"新叶子相对源叶子的位置"：
+      // "vertical" = 左右并排（新叶子在右边）。
+      // 源叶子优先取当前活跃的（也就是用户正在写的那篇笔记），
+      // 拿不到时用 getLeaf(false) 兜底——它对无参数与 null 都返回一个叶子。
+      const source = this.app.workspace.getMostRecentLeaf() ?? this.app.workspace.getLeaf(false);
+      leaf = this.app.workspace.createLeafBySplit(source, "vertical", false);
+    }
+
+    if (!leaf) {
       new Notice(
-        "没能在右侧边栏创建面板。可以手动打开：命令面板 → 「InLoop 手记：打开面板」。",
+        "没能创建预览面板。可以手动打开：命令面板 → 「InLoop 手记：打开面板」。",
         10000,
       );
       return;
