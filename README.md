@@ -76,6 +76,9 @@ inloop --help
 
 ## 常用命令
 
+> **第一次使用？** 看 [docs/getting-started.md](docs/getting-started.md)，
+> 那是从新建文章到粘贴进公众号的完整走查。
+
 | 命令 | 作用 |
 |---|---|
 | `inloop new --title "标题" --slug your-slug --template paper-note` | 新建文章 |
@@ -89,6 +92,7 @@ inloop --help
 | `inloop status <article> ready` | 修改文章状态 |
 | `inloop rules` | 列出全部校验规则码 |
 
+`<文章>` 可写目录、`index.md` 路径或 slug（推荐 slug，最短）。
 `check` 的退出码：无问题为 `0`，存在 ERROR 为 `1`——可直接用于 CI。
 
 构建产物在 `dist/wechat/<slug>/` 下：`article.html` 是要复制进公众号后台的正文，
