@@ -122,6 +122,32 @@ console.log("stripHtml（剪贴板的纯文本兜底）");
   check("首尾空白被去掉", utils.stripHtml("  <p>x</p>  ") === "x");
 }
 
+console.log("");
+console.log("pathToFileUrl（预览改用 src 指向真实文件）");
+{
+  check(
+    "Windows 盘符路径补三个斜杠",
+    utils.pathToFileUrl("E:\\InLoopHub\\dist\\a\\article.html") ===
+      "file:///E:/InLoopHub/dist/a/article.html",
+    utils.pathToFileUrl("E:\\InLoopHub\\dist\\a\\article.html"),
+  );
+  check(
+    "已经是 POSIX 绝对路径时补两个斜杠",
+    utils.pathToFileUrl("/home/u/a.html") === "file:///home/u/a.html",
+    utils.pathToFileUrl("/home/u/a.html"),
+  );
+  check(
+    "含空格与中文的路径原样保留（由 URL 规则处理）",
+    utils.pathToFileUrl("E:/d/屏幕 截图.html") === "file:///E:/d/屏幕 截图.html",
+    utils.pathToFileUrl("E:/d/屏幕 截图.html"),
+  );
+  check(
+    "frameBaseHref 以斜杠结尾（相对路径拼接必需）",
+    utils.frameBaseHref("E:/a/b/") === "file:///E:/a/b/",
+    utils.frameBaseHref("E:/a/b/"),
+  );
+}
+
 rmSync(outDir, { recursive: true, force: true });
 
 console.log("");

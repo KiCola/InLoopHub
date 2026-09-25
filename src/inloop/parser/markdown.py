@@ -75,8 +75,10 @@ def build_parser() -> MarkdownIt:
 
     以 ``commonmark`` 为基线而不是 ``gfm-like``：后者会引入 linkify 依赖，
     而任务书 §21 的依赖清单里没有它。表格与删除线是内置规则，直接开启即可。
+
+    **开启 ``breaks``（单个换行即换行）**，理由见 :func:`render_markdown` 的说明。
     """
-    md = MarkdownIt("commonmark")
+    md = MarkdownIt("commonmark", {"breaks": True})
     # 内置规则，commonmark 预设未启用
     md.enable("table")
     md.enable("strikethrough")
@@ -94,6 +96,21 @@ def render_markdown(
     resolve_embed: Callable[[str], str | None] | None = None,
 ) -> MarkdownRenderResult:
     """把 Markdown 正文渲染为 HTML 片段。
+
+    ## 单个换行也换行（``breaks``）
+
+    **默认开启。** 标准 Markdown 把段落内的单个换行当作空格，而 Obsidian
+    的预览把它当作换行——于是作者在编辑器里敲的回车，在本工具的预览里
+    "消失"了：写
+
+        aa
+        aaa
+
+    在 Obsidian 里是两行，在这里变成 ``aa aaa``。用户实测报过这个问题。
+
+    实时预览的意义就是"所见即将发布的样子"，那么它与作者写作时的环境
+    必须一致；否则预览反而误导人。发布到微信后 ``<br>`` 也正常保留，
+    因此这不影响成品，只是让两端一致。
 
     Args:
         text: 正文 Markdown（不含 front matter）。

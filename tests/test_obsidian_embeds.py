@@ -215,3 +215,40 @@ def test_解析器拒绝路径穿越(tmp_path: Path) -> None:
     Image.new("RGB", (4, 4)).save(outside)
 
     assert _resolve_embed(article_dir, "../外.png") is None
+
+
+# --- 换行：与 Obsidian 保持一致 --------------------------------------------
+
+
+def test_单个换行渲染成_br() -> None:
+    """作者在 Obsidian 里敲的回车必须保留。
+
+    **标准 Markdown 会把段落内的单个换行当作空格**，而 Obsidian 把它当作换行。
+    于是作者写：
+
+        aa
+        aaa
+
+    在 Obsidian 里是两行，在本工具的预览里变成 ``aa aaa``——用户实测报过
+    这个问题（"我在左边的回车换行在右边出现了问题"）。
+
+    实时预览的意义是"所见即将发布的样子"，那就必须与作者的写作环境一致，
+    否则预览反而误导人。因此解析器开启 ``breaks``。
+    """
+    rendered = render_markdown("aa\naaa")
+    assert "<br" in rendered.html, f"单个换行没有产生换行：{rendered.html!r}"
+    assert "aa" in rendered.html and "aaa" in rendered.html
+
+
+def test_空行仍然分段() -> None:
+    """开启 breaks 不能把"空行分段"也吃掉——两种写法要保持可区分。"""
+    rendered = render_markdown("aa\n\naaa")
+    assert rendered.html.count("<p>") == 2, rendered.html
+    assert "<br" not in rendered.html, "空行不该产生 <br>"
+
+
+def test_代码块里的换行不受_breaks_影响() -> None:
+    """代码块的换行本来就保留，不能因为 breaks 多出 <br>。"""
+    rendered = render_markdown("```\na = 1\nb = 2\n```")
+    assert "<br" not in rendered.html, rendered.html
+    assert "a = 1" in rendered.html

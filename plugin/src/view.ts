@@ -12,9 +12,7 @@ import { STATUSES } from "./inloop/cli";
 import { readTextFile, toVaultPath } from "./obsidian-env";
 import {
   FRAME_SANDBOX,
-  extractBodyHtml,
-  frameBaseHref,
-  wrapForFrame,
+  pathToFileUrl,
 } from "./preview-utils";
 
 export const VIEW_TYPE_INLOOP_PREVIEW = "inloop-notes-preview";
@@ -329,18 +327,25 @@ export class InloopPreviewView extends ItemView {
     try {
       const build = await this.plugin.runRaw(["build-wechat", slug]);
       const result = build as unknown as BuildResult;
-      // 读失败时让异常带着**真实原因**抛出来，不要返回 null 后只说"读不到"——
-      // 那样调用方无从判断是文件不存在、路径不对还是权限不足。
-      const html = readTextFile(result.html_path);
+      // 读一次产物，确认它真的存在且可读；失败时异常会带**真实原因**
+      readTextFile(result.html_path);
       busy.remove();
-      const body = extractBodyHtml(html);
+
+      // **用 src 指向真实的产物文件，而不是把 HTML 塞进 srcdoc。**
+      //
+      // 为什么改：`srcdoc` 生成的文档**没有 URL 基址**，里面相对路径的图片
+      // 依赖手动注入的 `<base href="file:///...">`。这条路在 Chrome 里实测可用，
+      // 但在 Obsidian 的 Electron 里图片不显示——`srcdoc` + `file://` 子资源
+      // 受环境策略影响，行为不如"真的导航到一个 file:// 文档"可靠。
+      //
+      // 用 src 之后：文档有真实 URL（就是产物 HTML 的 file:// 地址），
+      // 相对路径天然解析正确，**连 base 都不需要**。
+      // 顺带少一次字符串拼接与转义，预览也不会因 srcdoc 过大而失败。
       const frame = host.createEl("iframe", { cls: "inloop-frame" });
-      // sandbox 不能为空：空 sandbox 会阻止一切 file:// 加载，图片全成坏图。
-      // allow-same-origin 不授予脚本执行权限，仍能隔离样式。
+      // sandbox 保留 allow-same-origin：产物样式全内联，不需要脚本，
+      // 也不该有机会执行脚本。
       frame.setAttribute("sandbox", FRAME_SANDBOX);
-      // base 指向产物目录：产物里的图片是相对路径，没有它就会相对 Obsidian 的
-      // app:// 基址解析而全部失败。
-      frame.srcdoc = wrapForFrame(body, frameBaseHref(result.output_dir));
+      frame.setAttribute("src", pathToFileUrl(result.preview_path || result.html_path));
     } catch (error) {
       busy.remove();
       const message = error instanceof Error ? error.message : String(error);

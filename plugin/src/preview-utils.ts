@@ -20,17 +20,35 @@
 export const FRAME_SANDBOX = "allow-same-origin";
 
 /**
+ * 把磁盘路径转成 `file://` URL。
+ *
+ * 预览用 iframe 的 `src` 指向产物 HTML（而不是塞进 `srcdoc`），因此需要这个转换。
+ * 为什么不用 `srcdoc`：它生成的文档**没有 URL 基址**，里面相对路径的图片要靠
+ * 手动注入 `<base>`；这条路在 Chrome 里能用，在 Electron 里却不一定。
+ * 让 iframe 真的导航到一个 `file://` 文档更可靠，且不必再注入 base。
+ *
+ * Windows 盘符要额外加一个斜杠：`E:/a/b` → `file:///E:/a/b`；
+ * POSIX 路径已经是 `/` 开头，只需补两个斜杠。
+ */
+export function pathToFileUrl(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  if (/^[A-Za-z]:/.test(normalized)) {
+    return `file:///${normalized}`;
+  }
+  return `file://${normalized.startsWith("/") ? "" : "/"}${normalized}`;
+}
+
+/**
  * 由产物目录构造 iframe 需要的 `base href`。
  *
- * 产物里的图片是**相对路径**（`images/architecture.png`）。在 `srcdoc` 里
- * 它会相对 Obsidian 的 `app://` 基址解析而全部失败，因此必须给出 base。
+ * 保留它是为了兼容"把 HTML 塞进 srcdoc"的做法（预览的早期实现）；
+ * 现在预览走 `src` + `pathToFileUrl`，已不需要 base。
  *
  * @param outputDir 产物目录，Windows 或 POSIX 形式都可以
  * @returns 形如 `file:///E:/InLoopHub/dist/wechat/001-x/` 的字符串（以斜杠结尾）
  */
 export function frameBaseHref(outputDir: string): string {
-  const normalized = outputDir.replace(/\\/g, "/").replace(/\/+$/, "");
-  return `file:///${normalized.replace(/^\/+/, "")}/`;
+  return `${pathToFileUrl(outputDir.replace(/\/+$/, ""))}/`;
 }
 
 /**
