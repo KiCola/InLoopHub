@@ -148,6 +148,8 @@ def test_元数据字段与键序稳定() -> None:
         "category",
         "tags",
         "images",
+        "byline",
+        "byline_note",
         "render_options",
         "generated_at",
     ]
@@ -178,14 +180,19 @@ def test_渲染选项被记录且与产物一致() -> None:
     assert options["paragraph_spacing"]
 
     html = (outcome.output_dir / ARTICLE_HTML).read_text(encoding="utf-8")
-    # 必须取**正文**里的段落，而不是卡片内的段落：
-    # 卡片内部有自己的内距，`render_options` 记录的是正文段距。
+    # 必须取**正文**里的段落，排除两类：
+    # - 卡片内的段落：卡片有自己的内距，而 render_options 记录的是正文段距
+    # - 落款区内的段落：那是刊物式头部，字号与正文不同
     from bs4 import BeautifulSoup
 
     container = BeautifulSoup(html, "html.parser").find("div")
     assert container is not None
     body_paragraph = next(
-        (p for p in container.find_all("p") if p.find_parent("blockquote") is None),
+        (
+            p
+            for p in container.find_all("p")
+            if p.find_parent("blockquote") is None and p.find_parent("section") is None
+        ),
         None,
     )
     assert body_paragraph is not None, "文章应至少有一个正文段落"

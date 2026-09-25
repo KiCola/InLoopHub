@@ -38,6 +38,8 @@ FIELD_ORDER: tuple[str, ...] = (
     "tags",
     "summary",
     "cover",
+    "byline",
+    "byline_note",
     "platforms",
 )
 
@@ -133,6 +135,11 @@ def article_meta(article: Article) -> dict[str, Any]:
         "cover": article.cover,
         "platforms": _order_platforms(article.platforms),
     }
+    # 落款区是可选项：只在有值时写出，避免每篇文章都多两行空字段
+    if article.byline:
+        meta["byline"] = article.byline
+    if article.byline_note:
+        meta["byline_note"] = article.byline_note
     # 未知字段追加在已知字段之后，保留作者原始意图
     for key, value in article.extra.items():
         if key not in meta:

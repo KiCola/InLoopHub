@@ -361,7 +361,7 @@ def _tokenize_selector(selector: str) -> list[str]:
 
 
 #: 已实现的伪类
-_SUPPORTED_PSEUDO = ("only-child", "has")
+_SUPPORTED_PSEUDO = ("only-child", "only-of-type", "has")
 
 
 def _match_chain(tag: Tag, chain: list[str]) -> bool:
@@ -428,6 +428,8 @@ def _tag_matches(tag: Tag, token: str) -> bool:
     kind, argument = pseudo
     if kind == "only-child":
         return _is_only_child(tag)
+    if kind == "only-of-type":
+        return _is_only_of_type(tag)
     if kind == "has":
         return _has_matching_child(tag, argument or "")
     return False
@@ -450,38 +452,100 @@ def _split_pseudo(token: str) -> tuple[str, tuple[str, str | None] | None]:
 
 
 def _is_only_child(tag: Tag) -> bool:
-    """是否为父元素下唯一的一个标签子元素（忽略空白文本）。"""
+    """判断"整段只有这一处标记"。
+
+    与 CSS 规范里的 ``:only-child`` **有意不同**：规范只看元素兄弟，
+    因此 ``<p>前面文字 <strong>x</strong> 后面文字</p>`` 里的 ``strong``
+    也算 only-child。但本项目要表达的是"整段就是这一处加粗"，
+    周围有实际文字时不应触发。因此这里额外要求：除空白文本外，
+    父元素下只有这一个标签子元素。
+
+    （只把纯空白的文本节点排除在外——例如 ``<p><strong>x</strong></p>``
+    里那个常伴随出现的空文本节点。）
+    """
     parent = tag.parent
     if not isinstance(parent, Tag):
         return False
-    siblings = [
+
+    tag_children: list[Tag] = []
+    for child in parent.children:
+        if isinstance(child, Tag):
+            tag_children.append(child)
+        elif isinstance(child, NavigableString) and child.strip():
+            # 有实际文字 → 不是"整段只有这一处标记"
+            return False
+    return len(tag_children) == 1 and tag_children[0] is tag
+
+
+def _is_only_of_type(tag: Tag) -> bool:
+    """是否为父元素下唯一一个**同标签**的子元素。
+
+    与 ``:only-child`` 的区别：同名的可以有多个兄弟，只要不同名即可。
+    重点段落的判定需要它——``<blockquote><p><strong>x</strong></p></blockquote>``
+    里那个 ``p`` 是唯一的 p，而两段引用的 ``p`` 不是。
+    """
+    parent = tag.parent
+    if not isinstance(parent, Tag):
+        return False
+    same_type = [
         child
         for child in parent.children
-        if isinstance(child, Tag) or (isinstance(child, NavigableString) and child.strip())
+        if isinstance(child, Tag) and child.name == tag.name
     ]
-    return len(siblings) == 1
+    return len(same_type) == 1 and same_type[0] is tag
 
 
 def _has_matching_child(tag: Tag, argument: str) -> bool:
-    """实现 ``:has()`` 的受限形式：``> 选择器`` 表示直接子元素。
+    """实现 ``:has()`` 的受限形式：参数为「相对选择器」。
 
-    只支持本项目需要的形式（直接子元素匹配），不做完整的 CSS ``:has()``——
-    完整实现需要处理任意组合器与嵌套，收益与复杂度不成比例。
-    遇到看不懂的形式时**返回 False 并让上层校验拦住**，而不是猜测。
+    支持本项目需要的形式：以 ``>`` 开头的直接子代链，例如
+    ``> blockquote:only-child``、``p > strong:only-child``。
+
+    语义是「存在某个直接子元素，从它开始能匹配整条相对选择器」。
+
+    不做完整的 CSS ``:has()``（任意组合器与嵌套组合）：收益与复杂度不成比例。
+    看不懂的形式返回 False，而**不是**当作"不支持"静默放过——
+    调用方（``_validate_selector``）已保证只有预期形式会走到这里。
     """
     target = argument.strip()
     if not target:
         return False
+
+    # 以 ">" 开头表示直接子代；本项目未使用其他行首组合器
     if target.startswith(">"):
         target = target[1:].strip()
+    if not target:
+        return False
 
-    # 去掉末尾的组合器（``tag >`` 与 ``> tag`` 两种写法都要能处理）
-    target = target.rstrip(">").strip()
-    if not target or " " in target:
+    # 按 ">" 切分后必须**先 strip 再判空**：
+    # `p > strong` 会被切成 ["p ", " strong"]，若先判空会把带空格的段误判为空段，
+    # 于是整条选择器静默返回 False。
+    segments = [segment.strip() for segment in target.split(">")]
+    segments = [segment for segment in segments if segment]
+    if not segments:
         return False
 
     for child in tag.children:
-        if isinstance(child, Tag) and _tag_matches(child, target):
+        if isinstance(child, Tag) and _match_descendant_chain(child, segments):
+            return True
+    return False
+
+
+def _match_descendant_chain(node: Tag, segments: list[str]) -> bool:
+    """沿直接子代链逐段匹配；每一段可以包含多个简单选择器（如 ``strong:only-child``）。"""
+    if not segments:
+        return True
+
+    head, rest = segments[0], segments[1:]
+    for token in head.split():
+        if not _tag_matches(node, token):
+            return False
+
+    if not rest:
+        return True
+
+    for child in node.children:
+        if isinstance(child, Tag) and _match_descendant_chain(child, rest):
             return True
     return False
 
@@ -517,11 +581,15 @@ class WechatRenderResult:
         html: 带内联样式的正文 HTML（含容器标签）。
         unstyled_tags: 未匹配到任何样式的标签名，供排查"样式漏了"。
         warnings: 渲染提示。
+        numbered_headings: 自动加上编号的二级标题数量。
+        has_byline: 是否插入了落款区。
     """
 
     html: str
     unstyled_tags: tuple[str, ...] = field(default=())
     warnings: tuple[str, ...] = field(default=())
+    numbered_headings: int = 0
+    has_byline: bool = False
 
 
 def render_wechat_html(
@@ -531,6 +599,9 @@ def render_wechat_html(
     stylesheet: StyleSheet | None = None,
     theme: str | None = None,
     container: bool = True,
+    heading_numbers: bool | None = None,
+    byline: str = "",
+    byline_note: str = "",
 ) -> WechatRenderResult:
     """把规范化后的 HTML 渲染为微信兼容 HTML。
 
@@ -540,6 +611,9 @@ def render_wechat_html(
         stylesheet: 已解析的样式表；为 None 时按主题加载。
         theme: 主题名；为 None 时取配置里的 ``wechat.theme``。
         container: 是否套上正文容器标签。产物需要，预览外壳不需要。
+        heading_numbers: 是否给二级标题自动编号；为 None 时取配置。
+        byline: 落款区主行；为空则不渲染落款区。
+        byline_note: 落款区副行。
 
     Returns:
         渲染结果。
@@ -549,6 +623,17 @@ def render_wechat_html(
 
     _apply_code_highlighting(soup)
     _build_figures(soup, config, sheet)
+
+    if heading_numbers is None:
+        heading_numbers = _config_bool(config, "auto_number_headings", default=False)
+    numbered = apply_heading_numbers(
+        soup,
+        enabled=heading_numbers,
+        separator=_config_value(config, "heading_number_separator") or " · ",
+        padding=int(_config_value(config, "heading_number_padding") or 2),
+    )
+    prepend_byline(soup, byline=byline, note=byline_note)
+    has_byline = bool(byline.strip())
 
     warnings: list[str] = []
     unstyled: dict[str, None] = {}
@@ -575,7 +660,11 @@ def render_wechat_html(
 
     if not container:
         return WechatRenderResult(
-            html=inner, unstyled_tags=tuple(unstyled), warnings=tuple(warnings)
+            html=inner,
+            unstyled_tags=tuple(unstyled),
+            warnings=tuple(warnings),
+            numbered_headings=numbered,
+            has_byline=has_byline,
         )
 
     # 容器样式直接查规则表得到，不构造临时标签：
@@ -588,11 +677,15 @@ def render_wechat_html(
             html=f'<{ARTICLE_TAG} style="{style_attr}">{inner}</{ARTICLE_TAG}>',
             unstyled_tags=tuple(unstyled),
             warnings=tuple(warnings),
+            numbered_headings=numbered,
+            has_byline=has_byline,
         )
     return WechatRenderResult(
         html=f"<{ARTICLE_TAG}>{inner}</{ARTICLE_TAG}>",
         unstyled_tags=tuple(unstyled),
         warnings=tuple(warnings),
+        numbered_headings=numbered,
+        has_byline=has_byline,
     )
 
 
@@ -647,8 +740,121 @@ def _drop_covered_longhands(declarations: dict[str, str]) -> dict[str, str]:
     return result
 
 
+def apply_heading_numbers(
+    soup: BeautifulSoup, *, enabled: bool, separator: str = " · ", padding: int = 2
+) -> int:
+    """给二级标题自动编号：``Problem`` → ``01 · Problem``。
+
+    只处理 ``h2``：``h1`` 是文章大标题，``h3`` 属于更细的分层，都不参与编号。
+    正文里已经写了编号的标题会被识别并跳过，因此手工编号与自动编号不会叠加
+    （``01 · Problem`` 不会变成 ``01 · 01 · Problem``）。
+
+    Returns:
+        实际加上编号的标题数量。
+    """
+    if not enabled:
+        return 0
+
+    count = 0
+    for heading in soup.find_all("h2"):
+        text = heading.get_text().strip()
+        if not text:
+            continue
+        if _has_leading_number(text):
+            # 作者已手写编号：跳过，但仍要占用序号以免后续编号错位
+            count += 1
+            continue
+        number = str(count + 1).zfill(max(1, padding))
+        heading.clear()
+        heading.string = f"{number}{separator}{text}"
+        count += 1
+    return count
+
+
+def _has_leading_number(text: str) -> bool:
+    """判断标题是否已经以编号开头，如 ``01 ·``、``1.``、``01``。"""
+    return re.match(r"^\s*\d{1,3}\s*(?:[.·、:：)）]|\s)", text) is not None
+
+
+def prepend_byline(soup: BeautifulSoup, *, byline: str, note: str = "") -> bool:
+    """在正文最前面插入落款区。
+
+    落款区形态（对应参考账号的刊物式头部）：上方一道细线，居中一行小字刊名，
+    其下可选一行更小的副标题。样式**直接内联**——产物零 class，
+    不能依赖样式表里的类选择器。
+
+    Returns:
+        是否插入了落款区。
+    """
+    if not byline.strip():
+        return False
+
+    def styled(tag: Tag, declarations: dict[str, str], text: str) -> Tag:
+        tag["style"] = to_style_attribute(declarations)
+        tag.string = text
+        return tag
+
+    section = soup.new_tag("section")
+    section["style"] = to_style_attribute(
+        {
+            "margin": "0 0 36px 0",
+            "padding": "18px 0 0 0",
+            "border-top": "1px solid #e5e7eb",
+            "text-align": "center",
+        }
+    )
+    section.append(
+        styled(
+            soup.new_tag("p"),
+            {
+                "margin": "0",
+                "font-size": "13px",
+                "line-height": "1.6",
+                "font-weight": "700",
+                "letter-spacing": "0.08em",
+                "color": "#6b7280",
+            },
+            byline.strip(),
+        )
+    )
+    if note.strip():
+        section.append(
+            styled(
+                soup.new_tag("p"),
+                {
+                    "margin": "6px 0 0 0",
+                    "font-size": "12px",
+                    "line-height": "1.6",
+                    "color": "#9ca3af",
+                },
+                note.strip(),
+            )
+        )
+
+    body = soup.body
+    target = body if body is not None else soup
+    target.insert(0, section)
+    return True
+
+
+def _config_bool(config: Config, key: str, *, default: bool) -> bool:
+    """读一个布尔配置项；缺失时返回默认值。
+
+    YAML 里可能写成 ``true`` / ``"true"`` / ``yes``，这里统一按真假文本判断，
+    避免"配置写了 true 却因为字符串类型被判为假"。
+    """
+    value = _config_value(config, key)
+    if value is None:
+        return default
+    return value.strip().lower() in {"true", "yes", "on", "1"}
+
+
 def _config_value(config: Config, key: str) -> str | None:
     """读一个渲染配置项；缺失或不可用时返回 None。
+
+    这里**不做 strip**：部分配置项的首尾空格是有意义的——例如
+    ``heading_number_separator: ' · '`` 依赖两端空格来分隔编号与标题，
+    剥掉就会渲染成 ``01·Problem``。取值只做"是否为空"的判断。
 
     这里**只记录与覆盖**，不负责校验配置完整性——那是 config 层与 check 的职责。
     """
@@ -656,8 +862,8 @@ def _config_value(config: Config, key: str) -> str | None:
         value = config.wechat_value(key)
     except Exception:
         return None
-    text = str(value).strip()
-    return text or None
+    text = str(value)
+    return text if text.strip() else None
 
 
 def resolve_typography(config: Config, sheet: StyleSheet) -> dict[str, dict[str, str]]:

@@ -129,3 +129,25 @@
   line-height: 1.6;
 }
 
+/* 重点段落：引用里唯一一段且整段加粗（正文写作 `> **整段话**`）。
+   形态由本主题决定：这里把卡片外形全部清掉，只留加粗彩色文字。
+   配色由 base.css 统一，本处只负责"不成卡片"。 */
+.inloop-article blockquote:has(p:only-of-type > strong:only-child) {
+  padding: 0;
+  border-left: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* 深底卡片：同样必须在本主题内明确写出形态，否则会被上面的通用
+   blockquote 规则按顺序覆盖（本文件后加载）。 */
+.inloop-article blockquote blockquote {
+  background: var(--brand-dark-bg);
+}
+
+/* 外层只包一张深底卡片时，外壳不留内距（避免透明外壳占出一段空白）。
+   必须写在主题里：base 先加载，会被本条按顺序覆盖。 */
+.inloop-article blockquote:has(> blockquote:only-child) {
+  margin: 0;
+  padding: 0;
+}

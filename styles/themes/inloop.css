@@ -153,3 +153,31 @@
   font-size: 13px;
   line-height: 1.6;
 }
+
+/* 重点段落：引用里唯一一段且整段加粗（正文写作 `> **整段话**`）。
+   形态由本主题决定：把卡片外形全部清掉，只留加粗彩色文字。
+   配色由 base.css 统一，本处只负责"不成卡片"。
+
+   刻意**不写 margin**：外边距交给通用 blockquote 规则决定。
+   若在这里写 margin，深底卡片的外层包装块（它也命中本规则）会被改成
+   28px，把已经收掉的空白又撑回来。 */
+.inloop-article blockquote:has(p:only-of-type > strong:only-child) {
+  padding: 0;
+  border-left: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* 深底卡片：必须在本主题内明确写出底色，否则会被上面的通用
+   blockquote 规则按顺序覆盖（本文件后加载）。 */
+.inloop-article blockquote blockquote {
+  background: var(--brand-dark-bg);
+}
+
+/* 外层只包一张深底卡片时，外壳不留外边距与内距。
+   写在文件最末：它的选择器与"重点段落"规则同为 :has，靠顺序压过对方，
+   保证透明外壳不会占出一段空白。 */
+.inloop-article blockquote:has(> blockquote:only-child) {
+  margin: 0;
+  padding: 0;
+}

@@ -24,6 +24,15 @@ wechat:
   # 排版主题：对应 styles/themes/<名称>.css，用 `inloop themes` 查看全部
   # inloop 项目默认（A 的标题 + B 的卡片）/ compact 紧凑 / standard 标准 / generous 慷慨
   theme: "inloop"
+
+  # 是否给二级标题自动编号：`## Problem` 渲染为 `## 01 · Problem`
+  # 只对 h2 编号（h1 用于文章大标题，h3 属于更细的分层，不参与编号）
+  auto_number_headings: false
+  # 自动编号的分隔符（注意：YAML 中值里若出现「空格井号」会被当成注释而截断，
+  # 因此这里用单引号包住，避免" · " 被截成 "·"）
+  heading_number_separator: ' · '
+  # 编号补零到几位
+  heading_number_padding: 2
   # 大图阈值（字节）：超过 warning 给 WARNING，超过 error 给 ERROR，任务书 §11
   image_warning_bytes: 3145728
   image_error_bytes: 8388608

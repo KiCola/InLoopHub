@@ -191,6 +191,40 @@
   color: #e8eaed;
 }
 
+/* 重点段落与深底卡片的**配色与文字色**在此统一；**卡片外形（内距、圆角、
+   竖线）由各主题定义**——因为主题负责卡片形态。
+
+   注意：不要把卡片的 padding / border 写在这里。本文件先于主题加载，
+   主题里通用的 `blockquote` 规则会按顺序覆盖它们，出现"底色生效了、
+   内距与竖线没生效"这种半生效的怪现象（开发中真实踩过）。 */
+
+/* 引文只有一张深底卡片时，去掉外层包装的自身占位。
+   外壳本身是透明的，但主题给通用 blockquote 的内距会留下一段空白，
+   看起来像多了一个空块。这里连同外边距一并收掉，观感只剩那张深底卡片。
+   注意不要在这里写 padding/border——那两项由主题负责。 */
+.inloop-article blockquote:has(> blockquote:only-child) {
+  margin: 0;
+}
+
+/* 重点段落：引用里唯一一段且整段只有一处加粗（正文写作 `> **整段话**`）。
+   呈现为**没有卡片的加粗彩色文字**，用于"这一整句是重点"。
+
+   为什么用这个写法而不是新造语法：`**...**` 是标准 Markdown 强调，
+   读者与工具都认识；用作块级强调不需要私有记号。
+
+   用 ``p:only-of-type`` 而不是 ``p``：``:has()`` 只问"存在某个子元素匹配"，
+   不管兄弟个数；加上"唯一的段落"才能排除"引用里有两段、其中一段整段加粗"
+   的情况——那种仍应是卡片。 */
+.inloop-article blockquote:has(p:only-of-type > strong:only-child) p {
+  font-weight: 700;
+  color: var(--brand-primary);
+}
+
+.inloop-article blockquote:has(p:only-of-type > strong:only-child) strong {
+  color: var(--brand-primary);
+  font-weight: 700;
+}
+
 /* 图注：由构建脚本按图片的 title（无则 alt）自动生成（任务书 §10） */
 .inloop-article .inloop-caption {
   text-align: center;

@@ -12,6 +12,8 @@ tags:
   - 模仿学习
 summary: "完整记录一次机器人模仿学习数据集的复现过程，包括失败的尝试与最终定位到的对齐问题。"
 cover: cover.png
+byline: "RoboDojo 复现"
+byline_note: "实验日志"
 platforms:
   wechat: true
   blog: false

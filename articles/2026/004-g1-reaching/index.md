@@ -12,6 +12,8 @@ tags:
   - 调试
 summary: "一次抓取策略从仿真成功到真机失败的完整复盘，定位到域随机化的分布设置与代码里的三个具体问题。"
 cover: cover.png
+byline: "InLoop Notes"
+byline_note: "调试复盘"
 platforms:
   wechat: true
   blog: false

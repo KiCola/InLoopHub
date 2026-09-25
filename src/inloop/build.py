@@ -152,11 +152,17 @@ def build_article(
     # 4) 按素材映射改写正文中的图片路径
     rewritten_html = _rewrite_image_sources(normalized.html, assets.src_to_output)
 
-    # 5) 加样式：CSS 内联 + 白名单清洗
+    # 5) 加样式：CSS 内联 + 白名单清洗（顺带处理标题编号与落款区）
     active_theme = theme or theme_name(resolved_config)
     try:
         stylesheet = load_stylesheet(resolved_config, active_theme)
-        wechat = render_wechat_html(rewritten_html, config=resolved_config, stylesheet=stylesheet)
+        wechat = render_wechat_html(
+            rewritten_html,
+            config=resolved_config,
+            stylesheet=stylesheet,
+            byline=article.byline,
+            byline_note=article.byline_note,
+        )
     except StyleError as exc:
         raise BuildError(str(exc)) from exc
 
@@ -248,6 +254,8 @@ def build_metadata(
         "category": str(article.category),
         "tags": list(article.tags),
         "images": image_paths,
+        "byline": article.byline,
+        "byline_note": article.byline_note,
         "render_options": render_options.as_metadata(),
         "generated_at": _generated_at(),
     }

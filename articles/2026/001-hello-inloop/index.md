@@ -12,6 +12,8 @@ tags:
   - 工作流
 summary: "把文章、素材、状态、构建全部放进 Git 管理，解决内容散落在多个平台后无法检索、无法复用的问题。"
 cover: cover.png
+byline: "InLoop Notes"
+byline_note: "技术内容管理"
 platforms:
   wechat: true
   blog: false

@@ -181,6 +181,10 @@ class Article:
     extra: dict[str, Any] = field(default_factory=dict)
     issues: tuple[Issue, ...] = ()
     source: Path | None = None
+    #: 落款区主行，形如 `Minds in AI.`。为空则不渲染落款区。
+    byline: str = ""
+    #: 落款区副行，形如 `机器之心编辑部`。用于补充栏目/团队信息。
+    byline_note: str = ""
 
     @property
     def is_valid(self) -> bool:
@@ -363,6 +367,10 @@ class Article:
         known = set(REQUIRED_FIELDS)
         extra = {key: value for key, value in meta.items() if key not in known}
 
+        # 落款区：可选字段，为空则不渲染
+        byline = _parse_str(meta.get("byline"), "byline", issues).strip()
+        byline_note = _parse_str(meta.get("byline_note"), "byline_note", issues).strip()
+
         # 一致性自检：报出的规则码必须存在于规则表中。
         # 放在这里而不是只在测试里，是因为"报了一个没人认识的错误码"属于程序缺陷，
         # 必须立刻暴露，不能让用户拿着一个查不到的码去搜索。
@@ -385,6 +393,8 @@ class Article:
             extra=extra,
             issues=tuple(issues),
             source=source,
+            byline=byline,
+            byline_note=byline_note,
         )
 
 
