@@ -26,14 +26,14 @@
 }
 
 .inloop-article p {
-  margin: 0 0 24px 0;
+  margin: 0 0 18px 0;
   font-size: 15px;
   line-height: 1.75;
 }
 
 /* 一级标题：主色数字 + 标题同行，下方 2px 主色下划线（候选 A 的形式） */
 .inloop-article h1 {
-  margin: 40px 0 24px 0;
+  margin: 34px 0 20px 0;
   padding-bottom: 10px;
   border-bottom: 2px solid var(--brand-primary);
   font-size: 19px;
@@ -45,7 +45,7 @@
 /* 二级标题：浅蓝底框 + 主色文字。
    左右两侧留出内距，圆角与卡片保持同一套视觉语言。 */
 .inloop-article h2 {
-  margin: 32px 0 18px 0;
+  margin: 28px 0 16px 0;
   padding: 10px 16px;
   border-radius: 6px;
   background: var(--brand-primary-soft);
@@ -56,7 +56,7 @@
 }
 
 .inloop-article h3 {
-  margin: 24px 0 14px 0;
+  margin: 22px 0 12px 0;
   font-size: 16px;
   font-weight: 700;
   color: var(--brand-text);
@@ -71,14 +71,14 @@
 
 /* 浅底圆角卡片 + 左侧主色竖线 */
 .inloop-article blockquote {
-  margin: 28px 0;
+  margin: 22px 0;
   padding: 20px 22px;
   border-left: 3px solid var(--brand-primary);
   border-radius: 8px;
 }
 
 .inloop-article blockquote p {
-  margin: 0 0 10px 0;
+  margin: 0 0 8px 0;
   font-size: 15px;
   line-height: 1.75;
 }
@@ -119,7 +119,7 @@
 
 .inloop-article ul,
 .inloop-article ol {
-  margin: 0 0 24px 0;
+  margin: 0 0 18px 0;
   padding-left: 24px;
 }
 
@@ -129,15 +129,15 @@
 }
 
 .inloop-article pre {
-  margin: 24px 0;
+  margin: 20px 0;
 }
 
 .inloop-article table {
-  margin: 24px 0;
+  margin: 20px 0;
 }
 
 .inloop-article hr {
-  margin: 32px 0;
+  margin: 26px 0;
 }
 
 .inloop-article section {
