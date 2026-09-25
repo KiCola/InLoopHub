@@ -53,15 +53,62 @@ from inloop.rules import IssueLevel
 SCHEMA_VERSION = 1
 
 
+#: 是否已经往 stdout 写过 JSON。用于检测"发出 JSON 之后又有东西写进 stdout"
+#: 这类污染——它会让调用方 ``json.loads`` 报 ``Extra data``，把成功当失败。
+_EMITTED = False
+
+
+class JSONPollutedError(RuntimeError):
+    """stdout 上被写入了非 JSON 内容，或写了多份 JSON。"""
+
+
 def emit(payload: dict[str, Any]) -> None:
     """把结果写到 stdout。
 
     直接写 ``sys.stdout``：**不经 Rich**，因此不会有折行与颜色码。
     ``ensure_ascii=False`` 保留中文可读性；缩进让人手动调用时也能看。
+
+    若在此之前已经输出过一份 JSON，说明某个调用点重复输出了——
+    这时**立即报错**而不是继续写。stdout 上出现两份拼接内容会让调用方
+    完全无法解析，比直接失败更难排查（AGENTS.md §4：不静默失败）。
     """
+    global _EMITTED  # noqa: PLW0603 - 进程级状态，见上方说明
+
+    if _EMITTED:
+        raise JSONPollutedError(
+            "试图向 stdout 输出第二份 JSON。\n"
+            "修正方法：这是程序缺陷——每条命令只能有一个 JSON 出口。"
+        )
+
     text = json.dumps(payload, ensure_ascii=False, indent=2)
     sys.stdout.write(text + "\n")
     sys.stdout.flush()
+    _EMITTED = True
+
+
+def mark_emitted() -> None:
+    """标记"stdout 上已有内容"（供非 JSON 输出路径使用，避免重复输出）。"""
+    global _EMITTED  # noqa: PLW0603 - 进程级状态
+    _EMITTED = True
+
+
+def reset() -> None:
+    """清空输出状态，为下一次调用做准备。
+
+    为什么需要：``_EMITTED`` 是进程级标记，而同一进程里可能调用多次
+    （测试用 CliRunner 就是这样）。不重置的话第二次调用会被误判成
+    "重复输出两份 JSON"而失败。
+
+    状态只放在这一个模块里，避免"两处各记一个标记、各自以为对方负责"——
+    ``cli.py`` 曾经也有一个同名标记，两处状态必须同步才不会出错。
+    """
+    global _EMITTED  # noqa: PLW0603 - 进程级状态
+    _EMITTED = False
+
+
+def already_emitted() -> bool:
+    """stdout 上是否已经写过 JSON。"""
+    return _EMITTED
 
 
 def emit_error(code: str, message: str, *, hint: str = "") -> None:

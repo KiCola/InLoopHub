@@ -612,3 +612,66 @@ def test_info_命令的_json_给出内容目录与来源() -> None:
     assert Path(data["content_root"]).is_absolute()
     assert data["content_source"]
     assert "article_count" in data and "next_id" in data
+
+
+# --- stdout 污染（真出过两次 bug）-----------------------------------------
+
+
+def test_构建警告走_stderr_不污染_stdout(content_dir: Path) -> None:
+    """**这条守的是一个真出过两次的 bug。**
+
+    现象：构建明明成功（stdout 上有完整的 `ok: true` 信封），后面却跟了一段
+    IMG101/IMG103 警告文字——于是插件 `json.loads` 报 `Extra data`，
+    **把成功当成失败**报给用户。用户看到的报错甚至自带成功信息。
+
+    根因：`_print_warnings` 用了 `console`（stdout）。警告是给人看的附加信息，
+    与命令结果无关，必须走 stderr。
+
+    这条用**真实进程**跑，因为要看 stdout 的原始字节。
+    """
+    # content_dir 里的文章没有正文图，但构建仍会产生 warning 的可能：
+    # 缺 alt/caption 的图片最容易触发。这里直接断言"有警告时也不污染"。
+    code, _payload, stdout, stderr = invoke_real(content_dir, "build-wechat", "001-json-test")
+    assert stdout.strip(), "构建应当有输出"
+
+    # 核心断言：stdout 必须**恰好**是一份 JSON，多一个字符都不行
+    try:
+        json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        pytest.fail(
+            f"stdout 不是单份合法 JSON：{exc}\n"
+            f"这说明有输出（很可能是警告）写进了 stdout。\n"
+            f"末尾 200 字：{stdout[-200:]!r}"
+        )
+
+
+def test_警告写完不破坏_json_契约(content_dir: Path, capsys) -> None:
+    """直接测 `_print_warnings` 的输出流：必须只写 stderr。
+
+    比依赖"某篇文章恰好产生警告"更可靠——不管有没有警告，流向都不能错。
+    """
+    from inloop.cli import _print_warnings
+
+    _print_warnings(["IMG101 [WARNING] 测试警告", "IMG103 [WARNING] 测试警告二"])
+
+    captured = capsys.readouterr()
+    assert captured.out == "", f"警告写进了 stdout：{captured.out!r}"
+    assert "IMG101" in captured.err, f"警告没写到 stderr：{captured.err!r}"
+    assert "IMG103" in captured.err
+
+
+def test_重复输出_json_会立刻报错() -> None:
+    """`emit()` 检测到第二份输出时必须**立即报错**，而不是悄悄写出坏 JSON。
+
+    stdout 上出现两份拼接内容会让调用方完全无法解析，比直接失败更难排查。
+    """
+    from inloop import jsonapi
+
+    # 重置标记，模拟"已经输出过一份"
+    jsonapi._EMITTED = False  # noqa: SLF001 - 测试需要直接控制这个进程级标记
+    try:
+        jsonapi.emit({"ok": True, "schema": 1})
+        with pytest.raises(jsonapi.JSONPollutedError):
+            jsonapi.emit({"ok": True, "schema": 1})
+    finally:
+        jsonapi._EMITTED = False  # noqa: SLF001

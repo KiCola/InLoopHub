@@ -59,9 +59,6 @@ EXIT_VALIDATION_FAILED = 1
 #: 每次穿透 ctx.obj 会让签名变吵，而这是一个"进程级"设置。
 _content_override: Path | None = None
 _json_mode: bool = False
-#: stdout 上是否已经写过一份 JSON。用于避免兜底路径与 `_fail` 各发一份，
-#: 两份 JSON 会让调用方 `json.loads` 直接失败（这个 bug 真出现过）。
-_json_emitted: bool = False
 
 
 def _config_or_fail() -> Config:
@@ -111,6 +108,16 @@ def main_callback(
 ) -> None:
     """InLoop 手记：把 Markdown 内容仓库构建为微信公众号文章。"""
     global _content_override, _json_mode  # noqa: PLW0603 - 进程级设置，见上方说明
+
+    # **每次调用开始时重置输出状态。**
+    # 放在这里而不是 `_run()`：CliRunner 等调用方会**直接调用 Typer 应用、
+    # 绕过 `_run()`**，那样重置就不会发生，同一进程里的第二次调用会被
+    # 误判成"重复输出两份 JSON"而失败（测试里真实踩到过）。
+    # 全局回调是每次调用都必然经过的地方。
+    from inloop import jsonapi
+
+    jsonapi.reset()
+
     _content_override = content
     _json_mode = as_json
     ctx.obj = {"content": content, "json": as_json}
@@ -145,7 +152,6 @@ def _fail(message: str, *, code: str = "command_failed", hint: str = "") -> None
         from inloop import jsonapi
 
         jsonapi.emit_error(code, message, hint=hint)
-        globals()["_json_emitted"] = True
     err_console.print(f"[bold red]✗[/bold red] {escape(message)}")
     raise typer.Exit(code=EXIT_VALIDATION_FAILED)
 
@@ -1371,12 +1377,22 @@ def _load_article_or_fail(
 
 
 def _print_warnings(warnings: Sequence[str]) -> None:
-    """统一展示构建过程中的非致命问题。"""
+    """统一展示构建过程中的非致命问题。
+
+    **必须走 stderr。** 警告是给人看的附加信息，与命令结果无关；
+    写到 stdout 会污染 JSON 输出——调用方 ``json.loads`` 直接报
+    ``Extra data``，于是**把成功当失败**。这个 bug 真出现过：
+    构建明明成功（stdout 上有完整的 ``ok: true`` 信封），
+    后面却跟了一段 IMG101/IMG103 警告文字，插件因此报"输出不是合法 JSON"。
+
+    教训：`--json` 模式下"哪些输出算人类可读"要按**用途**判断，
+    不能只把"我以为是进度提示"的那几种分流到 stderr。
+    """
     if not warnings:
         return
-    console.print(f"[bold yellow]提示（{len(warnings)}）[/bold yellow]")
+    err_console.print(f"[bold yellow]提示（{len(warnings)}）[/bold yellow]")
     for warning in warnings:
-        console.print(f"  [yellow]{escape(warning)}[/yellow]")
+        err_console.print(f"  [yellow]{escape(warning)}[/yellow]")
 
 
 def _human_size(size: int) -> str:
@@ -1487,6 +1503,26 @@ def _replace_status_line(text: str, new_value: str) -> tuple[str, bool]:
     return text, False
 
 
+def _reset_output_state() -> None:
+    """清理上一次调用的输出状态。
+
+    为什么需要：输出状态是**进程级**的，而同一个进程里可能调用多次——
+    测试用 CliRunner 就是这样，某些嵌入场景也可能复用进程。
+    不重置的话第二次调用会被误判成"重复输出"而直接失败。
+
+    真实命令行每次都是新进程，因此这个问题只在同进程多次调用时暴露。
+
+    状态统一放在 :mod:`inloop.jsonapi` 里，这里只负责触发重置：
+    两处各记一个标记会让"谁负责"变得含糊，容易改错一处。
+    """
+    global _json_mode, _content_override  # noqa: PLW0603
+    from inloop import jsonapi
+
+    _content_override = None
+    _json_mode = False
+    jsonapi.reset()
+
+
 def _force_utf8_output() -> None:
     """把标准输出/错误强制为 UTF-8。
 
@@ -1577,10 +1613,13 @@ def _run() -> None:
 def _stdout_has_json() -> bool:
     """stdout 上是否已经写过 JSON（避免重复输出两份）。
 
-    这里不看流本身，只看"模式"——`_fail` 是唯一的错误出口，
-    如果它已经发过，调用方已经拿到东西了。
+    状态由 :mod:`inloop.jsonapi` 统一持有——它才是输出 JSON 的那个模块，
+    标记放它那里最不容易出现"两处各记一个、各自以为对方负责"的情况。
+    （`cli.py` 曾经也有一个同名标记，两处状态必须手动同步才不会出错。）
     """
-    return _json_emitted
+    from inloop import jsonapi
+
+    return jsonapi.already_emitted()
 
 
 def _emit_usage_error(exc: BaseException) -> None:
