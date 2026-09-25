@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import urllib.parse
 from dataclasses import dataclass, field
 
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -52,8 +53,23 @@ _FOOTNOTE_ITEM_STYLE = "font-size:13px;line-height:1.7;"
 class ExtractedImage:
     """从正文中抽出的一张图片。
 
+    ## 为什么同时保留「原文」与「解码后」两个 src
+
+    HTML 里的 ``src`` 是 **URL**，不是文件路径。Markdown 解析器会把含空格或
+    中文的目标做百分号编码（``a b.png`` → ``a%20b.png``、
+    ``屏幕.png`` → ``%E5%B1%8F...``），而磁盘上的文件名是原文。
+
+    两个用途需要两种形式，缺一不可：
+
+    - **改写 HTML** 必须按 **URL 原文**匹配（HTML 里就是那个字符串）
+    - **定位文件** 必须用**解码后**的路径（否则文件明明在却说找不到）
+
+    曾经只用一种形式，导致含空格/中文的图片既定位不到、也改不掉——
+    表现为"图片不存在"或"图片没被替换成产物路径"。
+
     Attributes:
-        src: 原始 ``src`` 值，即正文里写的相对路径。
+        src: HTML 里原样的 ``src`` 值（URL 形式），用于改写 HTML。
+            解码后的文件路径见 :attr:`path` 属性。
         alt: 替代文字；缺失时为空字符串。
         title: 可选的图片说明。
         is_local: 是否为本地相对路径（外部图片不参与素材复制）。
@@ -67,6 +83,14 @@ class ExtractedImage:
     title: str
     is_local: bool
     section: str = ""
+
+    @property
+    def path(self) -> str:
+        """URL 解码后的文件路径。
+
+        只对本地图片有意义；外部链接（``https://...``）解码后仍是原值。
+        """
+        return urllib.parse.unquote(self.src)
 
 
 @dataclass(frozen=True, slots=True)

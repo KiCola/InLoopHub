@@ -185,10 +185,28 @@ export default class InloopPlugin extends Plugin {
   // --- 预览 ---------------------------------------------------------------
 
   async activatePreview(): Promise<void> {
+    // **面板要开在右侧边栏**，不能占主编辑区。
+    // 用 getLeaf(false) 会在主区新开标签页，把用户的笔记挤走——
+    // 而用户要的是"左边编辑、右边看预览"。
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_INLOOP_PREVIEW);
-    // getRightLeaf 已被 obsidian.d.ts 标注 deprecated；getLeaf(false) 等价且不废弃。
-    // false 表示"不要新建分割"，即复用已有叶子。
-    const leaf: WorkspaceLeaf = existing[0] ?? this.app.workspace.getLeaf(false);
+    let leaf: WorkspaceLeaf | null = existing[0] ?? null;
+
+    if (!leaf) {
+      // ensureSideLeaf 是 1.7.2+ 的官方 API，语义明确（getRightLeaf 已废弃）
+      leaf = await this.app.workspace.ensureSideLeaf(VIEW_TYPE_INLOOP_PREVIEW, "right", {
+        active: true,
+        reveal: true,
+      });
+    }
+
+    if (!leaf) {
+      new Notice(
+        "没能在右侧边栏创建面板。可以手动打开：命令面板 → 「InLoop 手记：打开面板」。",
+        10000,
+      );
+      return;
+    }
+
     await leaf.setViewState({ type: VIEW_TYPE_INLOOP_PREVIEW, active: true });
     this.app.workspace.revealLeaf(leaf);
     this.refreshPreview();

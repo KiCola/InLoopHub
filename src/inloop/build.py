@@ -125,7 +125,14 @@ def build_article(
     output_dir = resolved_config.resolve_dist_root() / WECHAT_DIR / article.directory_name
 
     # 1) 正文 Markdown → HTML 片段
-    rendered = render_markdown(article.body)
+    # 传一个真正的文件解析器进去：Obsidian 的 `![[图.png]]` 只给了文件名，
+    # 而图片可能位于 assets/ 的任意子目录（Obsidian 的附件目录设置会造成
+    # assets/index/ 这类嵌套）。这里按几种常见位置去找，找不到就让 markdown
+    # 层产出 IMG105 ERROR——而不是留一行看不懂的文字在成品里。
+    rendered = render_markdown(
+        article.body,
+        resolve_embed=lambda name: _resolve_embed(resolved_article_dir, name),
+    )
     warnings: list[str] = list(rendered.warnings)
 
     # 2) 结构规范化：脚注与公式降级、抽图片清单、剥离 id/class
@@ -265,6 +272,57 @@ def build_metadata(
         "render_options": render_options.as_metadata(),
         "generated_at": _generated_at(),
     }
+
+
+def _resolve_embed(article_dir: Path, name: str) -> str | None:
+    """把 Obsidian 嵌入里的文件名解析成可用的相对路径。
+
+    嵌入语法只给文件名（``![[图.png]]``），不含目录。而图片实际可能在这些位置：
+
+    1. ``<文章目录>/<名字>``——作者直接放在文章目录下
+    2. ``<文章目录>/assets/<名字>``——本项目约定的位置
+    3. ``<文章目录>/assets/**/<名字>``——Obsidian 的附件目录设置会造出
+       ``assets/index/`` 这类嵌套，实测踩到过
+    4. ``<文章目录>/**/<名字>``——兜底，覆盖作者自定义的子目录
+
+    按此顺序找，**返回相对文章目录的路径**（与正文里手写的一致），
+    这样后续的素材管线不必知道嵌入语法的存在。
+
+    刻意**不做**跨文章或跨 vault 的全局搜索：那会让"同一文件名出现在多个位置"
+    变成静默选一个，而出错时又说不清为什么。找不到就让上层报错。
+    """
+    # 只接受文件名，拒绝路径穿越写法
+    if "/" in name or "\\" in name:
+        candidate = (article_dir / name).resolve()
+        if candidate.is_file() and _is_within(candidate, article_dir):
+            return candidate.relative_to(article_dir.resolve()).as_posix()
+        return None
+
+    ordered = [
+        article_dir / name,
+        article_dir / "assets" / name,
+    ]
+    for candidate in ordered:
+        if candidate.is_file():
+            return candidate.relative_to(article_dir).as_posix()
+
+    # 递归找：先 assets/，再整篇文章目录
+    for base in (article_dir / "assets", article_dir):
+        if not base.is_dir():
+            continue
+        for found in sorted(base.rglob(name)):
+            if found.is_file():
+                return found.relative_to(article_dir).as_posix()
+    return None
+
+
+def _is_within(path: Path, directory: Path) -> bool:
+    """判断路径是否在给定目录内（防止嵌入语法里的 ``../`` 越界）。"""
+    try:
+        path.resolve().relative_to(directory.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def _relative_reference(path: Path, base: Path, what: str) -> str:

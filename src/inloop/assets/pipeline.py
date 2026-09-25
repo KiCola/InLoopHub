@@ -135,18 +135,18 @@ def prepare_images(
             # 曾经这里写着"编辑器会自行处理外链图片"——那是错的，已按实测更正。
             result.warnings.append(
                 f"{_rel(article_dir)} {IMG_EXTERNAL.code} [{IMG_EXTERNAL.level.value}] "
-                f"正文引用了外链图片：`{image.src}`。"
+                f"正文引用了外链图片：`{image.path}`。"
                 f"微信编辑器不会抓取外链图片，粘贴后只显示为文字。"
                 f"修正方法：把图片下载到文章目录的 `assets/` 下，改用相对路径引用。"
             )
             continue
 
-        absolute_issue = _check_absolute(image.src, article_dir)
+        absolute_issue = _check_absolute(image.path, article_dir)
         if absolute_issue is not None:
             result.errors.append(absolute_issue)
             continue
 
-        source = _resolve(article_dir, image.src)
+        source = _resolve(article_dir, image.path)
 
         existing = copied.get(source)
         if existing is not None:
@@ -216,7 +216,7 @@ def _collect_source_issues(
     if not source.is_file():
         result.errors.append(
             f"{_rel(source)} {IMG_MISSING.code} [{IMG_MISSING.level.value}] "
-            f"正文引用的本地图片不存在：`{image.src}`。"
+            f"正文引用的本地图片不存在：`{image.path}`。"
             f"修正方法：把图片放到该位置，或改正正文中的路径。"
         )
         return False
@@ -251,8 +251,8 @@ def _collect_source_issues(
     if not image.title:
         result.warnings.append(
             f"{_rel(source)} {IMG_MISSING_CAPTION.code} "
-            f"[{IMG_MISSING_CAPTION.level.value}] 图片缺少 title（caption）：`{image.src}`。"
-            f'修正方法：写成 `![alt]({image.src} "图注")` 可为图片补一句说明。'
+            f"[{IMG_MISSING_CAPTION.level.value}] 图片缺少 title（caption）：`{image.path}`。"
+            f'修正方法：写成 `![alt]({image.path} "图注")` 可为图片补一句说明。'
         )
     return True
 
@@ -266,8 +266,8 @@ def _check_caption(image: ExtractedImage, source: Path, result: AssetResult) -> 
     if not image.alt:
         result.warnings.append(
             f"{_rel(source)} {IMG_MISSING_ALT.code} [{IMG_MISSING_ALT.level.value}] "
-            f"正文图片缺少 alt 文字：`{image.src}`。"
-            f"修正方法：写成 `![图片说明]({image.src})`，alt 会作为图片说明显示。"
+            f"正文图片缺少 alt 文字：`{image.path}`。"
+            f"修正方法：写成 `![图片说明]({image.path})`，alt 会作为图片说明显示。"
         )
 
 
@@ -326,6 +326,10 @@ def _resolve(article_dir: Path, reference: str) -> Path:
 
     使用 ``resolve()`` 而非简单拼接：正文里可能写 ``./assets/../assets/a.png``，
     规范化后再判断存在性才不会误判。
+
+    注意 ``reference`` 应当是**已解码的文件路径**：HTML 里的 ``src`` 是 URL
+    （含空格与中文时会被百分号编码），解码在提取阶段完成
+    （见 :func:`inloop.normalize._extract_images`），因此这里不再重复处理。
     """
     return (article_dir / reference).resolve()
 

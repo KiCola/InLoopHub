@@ -88,6 +88,11 @@ IMG_EXTERNAL = Rule(
     IssueLevel.WARNING,
     "正文引用了外链图片，微信编辑器不会抓取，粘贴后图片会丢失",
 )
+EMBED_NOT_FOUND = Rule(
+    "IMG105",
+    IssueLevel.ERROR,
+    "Obsidian 嵌入语法（![[文件名]]）指向的图片找不到",
+)
 
 # --- Markdown（任务书 §5）------------------------------------------------
 
