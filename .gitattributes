@@ -1,0 +1,24 @@
+# 统一换行与文本处理方式，规则见 AGENTS.md §4
+# 文本文件一律 LF，避免 Windows 检出时被改成 CRLF 造成无意义差异
+
+* text=auto eol=lf
+
+# 显式声明为文本的文件类型
+*.md      text eol=lf
+*.py      text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.json    text eol=lf
+*.toml    text eol=lf
+*.css     text eol=lf
+*.html    text eol=lf
+*.txt     text eol=lf
+*.gitignore text eol=lf
+
+# 二进制文件不做换行转换
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.webp    binary
+*.ico     binary
