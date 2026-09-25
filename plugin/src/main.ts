@@ -25,8 +25,11 @@ import {
   DEFAULT_SETTINGS,
   InloopSettingTab,
   detectRepoRoot,
+  invalidateRepoRootCache,
   resolveContentRoot,
   resolveExecutable,
+  warmRepoRootCache,
+  writePointerFile,
   type InloopSettings,
 } from "./settings";
 import { VIEW_TYPE_INLOOP_PREVIEW, InloopPreviewView } from "./view";
@@ -44,6 +47,9 @@ export default class InloopPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    // 预读 vault 里的工具指向文件（跨盘场景下这是唯一可行的自动发现方式）。
+    // 读一次缓存起来，之后同步取用——渲染路径不能被异步读拖慢。
+    await warmRepoRootCache(this.app);
     installStyles();
 
     this.registerView(VIEW_TYPE_INLOOP_PREVIEW, (leaf) => new InloopPreviewView(leaf, this));
@@ -121,6 +127,25 @@ export default class InloopPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+  }
+
+  /**
+   * 把当前生效的工具仓库路径写进 vault 的指向文件。
+   *
+   * 好处是它随坚果云同步：换电脑或重装插件都不必重填。
+   * 跨盘场景（本机：vault 在 C、工具在 E）无法靠搜索发现，只能由人告诉一次，
+   * 因此这个文件就是那次告知的持久化形式。
+   */
+  async rememberRepoRoot(repoRoot: string): Promise<void> {
+    await writePointerFile(this.app, repoRoot);
+    invalidateRepoRootCache();
+    await warmRepoRootCache(this.app);
+  }
+
+  /** 更新设置后清掉探测缓存，让新值立刻生效 */
+  refreshDetectionCache(): void {
+    invalidateRepoRootCache();
+    void warmRepoRootCache(this.app);
   }
 
   // --- 路径与调用参数 -----------------------------------------------------

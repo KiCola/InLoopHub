@@ -33,7 +33,10 @@ dev = [
 ]
 
 [project.scripts]
-inloop = "inloop.cli:app"
+# 指向 _run 而不是 app：_run 里有一层兜底异常处理，
+# 把未预期的异常转成结构化 JSON 错误而不是裸 traceback。
+# 调用方（编辑器插件）依赖 stdout 上的 JSON，traceback 会让它无法解析。
+inloop = "inloop.cli:_run"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

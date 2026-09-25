@@ -144,25 +144,53 @@ export interface DeletePreview extends Envelope {
   image_count: number;
 }
 
+/** 虚拟环境里 `inloop` 的候选相对路径（按当前平台优先排序） */
+function venvRelativePaths(): string[] {
+  return process.platform === "win32"
+    ? [".venv/Scripts/inloop.exe", ".venv/bin/inloop"]
+    : [".venv/bin/inloop", ".venv/Scripts/inloop.exe"];
+}
+
 /**
  * 猜一个可用的 `inloop` 路径。
  *
- * 顺序：用户显式配置 > 仓库内的虚拟环境 > PATH 上的 `inloop`。
- * 猜不出来时返回空串，由调用方给出"去哪里配置"的指引——
- * 直接报"命令找不到"对用户毫无帮助。
+ * 顺序：用户显式配置 > 环境变量 INLOOP_ROOT > 基准目录及其上级里的虚拟环境 >
+ * PATH 上的 `inloop`。
+ *
+ * **为什么要搜索而不是只查 PATH**：`inloop` 是本地 `pip install -e` 装进虚拟环境的，
+ * 通常**不在 PATH 上**。只查 PATH 的结果是用户看到"找不到 inloop"却发现设置里
+ * 三项都空着、不知道该填什么——这是实测踩到的问题（本机 `which inloop` 为空）。
+ *
+ * @param configured 用户在设置里填的路径；非空则直接采用
+ * @param baseDir 搜索起点，通常是 vault 路径
  */
-export function guessExecutable(configured: string, repoRoot: string): string {
+export function guessExecutable(configured: string, baseDir: string): string {
   if (configured.trim()) return configured.trim();
 
-  const candidates =
-    process.platform === "win32"
-      ? [`${repoRoot}/.venv/Scripts/inloop.exe`, `${repoRoot}/.venv/bin/inloop`]
-      : [`${repoRoot}/.venv/bin/inloop`, `${repoRoot}/.venv/Scripts/inloop.exe`];
+  const bases: string[] = [];
+  const fromEnv = (process.env.INLOOP_ROOT ?? "").trim();
+  if (fromEnv) bases.push(fromEnv);
 
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
+  // 工具仓库常与 vault 平级、或在 vault 内，因此从 baseDir 逐级向上找。
+  // 限制深度是为了不在整块磁盘上乱扫——那既慢又容易误命中无关目录。
+  if (baseDir.trim()) {
+    let current = baseDir.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    for (let depth = 0; depth < 4 && current; depth += 1) {
+      bases.push(current);
+      const slash = current.lastIndexOf("/");
+      if (slash <= 2) break; // 已到 "E:/" 这一级，再往上没有意义
+      current = current.slice(0, slash);
+    }
   }
-  // 交给 PATH 解析
+
+  for (const base of bases) {
+    for (const relative of venvRelativePaths()) {
+      const candidate = `${base.replace(/\\/g, "/")}/${relative}`;
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+
+  // 交给 PATH 解析（可能失败，由调用方给出"去哪里配置"的指引）
   return "inloop";
 }
 
@@ -215,8 +243,11 @@ export async function runCli<T extends Envelope>(
       throw new InloopError(
         "cli_not_found",
         `找不到 inloop 可执行文件：${options.executable}`,
-        "在插件设置里填写正确的 inloop 路径，例如 <工具仓库>/.venv/Scripts/inloop.exe。\n" +
-          "若尚未安装，请先按工具仓库 README 完成 Python 环境安装。",
+        "在插件设置里填入「工具仓库根目录」（例如 E:/InLoopHub），" +
+          "插件会在它的 .venv 里找到 inloop。\n" +
+          "填好后点「记住到 vault」，路径会存进 vault 的 inloop-path.txt，" +
+          "随同步盘走，换电脑不必重填。\n" +
+          "若尚未安装 Python 环境，请先按工具仓库 README 完成安装。",
       );
     }
     stdout = failure.stdout ?? "";

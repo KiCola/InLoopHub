@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
@@ -113,8 +114,18 @@ def main_callback(
 
 
 def _json_output() -> bool:
-    """当前是否处于 JSON 输出模式。"""
-    return _json_mode
+    """当前是否处于 JSON 输出模式。
+
+    正常情况下由主回调设置。但**兜底异常处理可能在主回调之前就触发**
+    （例如参数解析阶段出问题），那时标志位还是初始值，
+    于是明明带了 `--json` 却不输出 JSON——调用方拿到空 stdout 无从判断。
+
+    因此这里在标志位为假时**回退到检查命令行**：`--json` 是全局选项，
+    出现即表示调用方要机器可读输出。
+    """
+    if _json_mode:
+        return True
+    return "--json" in sys.argv[1:] or "--as-json" in sys.argv[1:]
 
 
 def _fail(message: str, *, code: str = "command_failed", hint: str = "") -> None:
@@ -1384,5 +1395,56 @@ def _replace_status_line(text: str, new_value: str) -> tuple[str, bool]:
     return text, False
 
 
+def _run() -> None:
+    """CLI 入口，含**兜底异常处理**。
+
+    为什么需要兜底：插件（以及任何 `--json` 调用方）依赖 stdout 上的结构化输出。
+    一旦有未预期的异常逃出去，用户看到的是 Python traceback，
+    而调用方拿到的是无法解析的输出——表现得像"工具坏了"而不是"这个操作失败了"。
+
+    因此这里把任何未捕获异常转成**一份 JSON 错误信封 + 非零退出码**，
+    同时把原始异常类型与信息写进 message（便于定位），
+    并在 stderr 上给出"这是缺陷，请反馈"的说明。
+
+    注意：这**不是**用来掩盖错误的——`_fail` 已覆盖的分支仍走各自的精确错误码，
+    这里只兜住"我们没想到的情况"。
+    """
+    try:
+        app()
+    except (typer.Exit, SystemExit):
+        raise
+    except KeyboardInterrupt:  # pragma: no cover - 人工中断
+        _fail("操作被中断。", code="interrupted")
+    except PermissionError as exc:
+        # 权限问题**不是**工具缺陷，把两者混在一起会指错方向：
+        # 用户会去反馈 bug，而真正要改的是文件权限或换个目录。
+        # 常见来源：内容目录只读、目录属主不对、同步盘客户端锁着文件。
+        _fail(
+            f"没有权限读写内容目录：{exc}",
+            code="permission_denied",
+            hint=(
+                "修正方法：\n"
+                "  1. 确认内容目录可写（右键属性里看「只读」是否被勾选）\n"
+                "  2. 确认当前用户是该目录的属主，或对它有写权限\n"
+                "  3. 若目录在坚果云/OneDrive 等同步盘里，"
+                "先确认同步客户端没有锁定文件\n"
+                "  4. 换一个本地目录试试，以区分是路径问题还是权限问题"
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - 兜底本来就要捕获一切
+        import traceback
+
+        detail = f"{type(exc).__name__}: {exc}"
+        traceback.print_exc()
+        _fail(
+            f"发生了未预期的错误：{detail}",
+            code="internal_error",
+            hint=(
+                "这是工具自身的缺陷，不是你操作的问题。\n"
+                "请把上面完整的 traceback 连同执行的命令一起反馈。"
+            ),
+        )
+
+
 if __name__ == "__main__":  # pragma: no cover - 手动调试用
-    app()
+    _run()

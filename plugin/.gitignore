@@ -4,3 +4,6 @@ dist/
 
 # 本机的 vault 路径配置（每台机器不同，且是绝对路径）
 vault.json
+
+# Obsidian 写进插件目录的启用状态与设置（含本机绝对路径）
+dist/data.json

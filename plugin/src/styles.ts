@@ -155,6 +155,19 @@ const CSS = `
 
 .inloop-hint { font-size: 11px; color: var(--text-muted); line-height: 1.7; }
 .inloop-busy { color: var(--text-accent); }
+
+/* 设置界面里"还需要填一项"的提示。要显眼——用户卡在这一步就没法用插件。 */
+.inloop-setup-warning {
+  border: 1px solid var(--text-warning, #d97706);
+  border-left-width: 3px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  background: var(--background-secondary);
+}
+.inloop-setup-warning strong { display: block; margin-bottom: 4px; }
+.inloop-setup-warning p { margin: 4px 0; font-size: 12px; line-height: 1.7; }
+
 .inloop-error {
   font-size: 12px;
   color: var(--text-error);
