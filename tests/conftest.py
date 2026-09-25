@@ -62,6 +62,8 @@ tags:
   - 标签二
 summary: "一句话摘要。"
 cover: "cover.png"
+byline: "测试刊名"
+byline_note: "测试副题"
 platforms:
   wechat: true
   blog: false
@@ -96,7 +98,12 @@ def mini_repo(tmp_path: Path) -> Iterator[Path]:
 
 @pytest.fixture()
 def mini_article(mini_repo: Path) -> tuple[Path, str]:
-    """在最小仓库中写入一篇文章，返回 (文章目录, 文章文本)。"""
+    """在最小仓库中写入一篇文章，返回 (index.md 路径, 文章文本)。
+
+    返回 **index.md 的路径**而不是文章目录：调用方几乎总是要读这个文件来
+    构造 :class:`Article`，返回目录会迫使每个调用方自己拼 `/ "index.md"`。
+    需要目录时用 ``index.parent``。
+    """
     from PIL import Image
 
     article_dir = mini_repo / "articles" / "2026" / "007-test-article"
@@ -105,5 +112,6 @@ def mini_article(mini_repo: Path) -> tuple[Path, str]:
     Image.new("RGB", (1175, 500), (0, 47, 167)).save(article_dir / "cover.png")
 
     text = make_article_text()
-    (article_dir / "index.md").write_text(text, encoding="utf-8", newline="\n")
-    return article_dir, text
+    index = article_dir / "index.md"
+    index.write_text(text, encoding="utf-8", newline="\n")
+    return index, text

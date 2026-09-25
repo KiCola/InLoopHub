@@ -1,14 +1,14 @@
 ---
-id: 5
-title: 示例：我的实战练习
-slug: practice-run
+id: 6
+title: Try
+slug: try
 date: 2026-09-25
 author: Zero Zhao
 category: research
-status: draft
+status: published
 tags:
-  - 练习
-summary: 用于走通完整发布流程。
+  - try
+summary: try
 cover: cover.png
 platforms:
   wechat: true
@@ -18,11 +18,27 @@ platforms:
   bilibili: false
 ---
 
-# 示例：我的实战练习
+# Try
 
-> TL;DR：提出了什么假设，目前有没有证据。
+> 提出了什么假设，目前有没有证据。
 
 ## Problem
+
+你好
+
+**我是钢铁侠**
+
+==妇联6==
+
+* 再怎么说
+
+1. aaa
+2. 2
+3. 333
+
+
+
+![](index/wallhaven-wel6q7.png)
 
 ## Hypothesis
 

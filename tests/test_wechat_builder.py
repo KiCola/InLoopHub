@@ -1,8 +1,19 @@
 """微信构建器的端到端测试（任务书 §22、§27）。
 
-本文件的关键部分是对**仓库里真实的 4 篇文章**做完整构建，而不是只测人造样例。
-任务书 §28 的要求很明确：只用简单样例测试，会出现"测试页面很好看、
-真正技术文章一塌糊涂"的结果。
+本文件分两类测试，职责不同：
+
+1. **对仓库里真实文章的端到端构建**（``REAL_ARTICLES``）。任务书 §28 的要求是
+   不能只用简单样例——否则会出现"测试页面很好看、真正技术文章一塌糊涂"。
+   这类测试会**自动覆盖 ``articles/`` 下的每一篇文章**，因此作者每新增一篇都会被
+   纳入校验。篇数**不写死**：`articles/` 是作者的内容目录，把篇数写进测试会让
+   "删掉自己的旧文章"变成一次测试失败。
+
+2. **对夹具仓库里合成文章的针对性测试**（``mini_repo`` / ``mini_article``）。
+   验的是行为与契约（键序、可复现性、主题记录、产物结构），
+   需要一个**内容可控**的文章，不能依赖作者的文章恰好长什么样。
+   注意这类测试要传**夹具仓库的配置**（``load_config(mini_repo)``）：
+   ``metadata.json`` 里的 ``source`` 是相对仓库根的路径，传真实仓库的配置会让它
+   带上临时目录前缀。
 """
 
 from __future__ import annotations
@@ -46,9 +57,16 @@ def digest_tree(directory: Path) -> dict[str, str]:
     return result
 
 
-def test_仓库中存在四篇真实文章() -> None:
-    """示例文章是验收的一部分，缺失说明仓库状态不对。"""
-    assert len(REAL_ARTICLES) >= 4, [p.as_posix() for p in REAL_ARTICLES]
+def test_仓库中存在可校验的真实文章() -> None:
+    """至少要有一篇真实文章作为端到端验证的对象。
+
+    这里**不再硬编码"至少 4 篇"**：`articles/` 是作者的内容目录，篇数会随写作
+    增减，把篇数写进测试会让"删掉自己的旧文章"变成一次测试失败。
+    真正要守住的是"有真实文章可测"，而不是"必须是 4 篇"。
+
+    校验覆盖所有存在的文章，因此作者每新增一篇，都会被自动纳入校验。
+    """
+    assert REAL_ARTICLES, "articles/ 下没有文章，端到端验证失去了对象"
 
 
 @pytest.mark.parametrize("index", REAL_ARTICLES, ids=lambda p: p.parent.name)
@@ -116,17 +134,17 @@ def test_构建不改动源文件(index: Path) -> None:
 
 
 def test_确定性_固定时间后两次构建逐字节一致(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    mini_repo: Path, mini_article: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """metadata.json 带生成时间，因此必须能固定它，否则无法验证可复现性。"""
     monkeypatch.setenv("SOURCE_DATE_EPOCH", "1767225600")
-    index = REAL_ARTICLES[0]
+    index, _ = mini_article
     article = load_article(index)
 
-    first = build_article(article, config=CONFIG)
+    first = build_article(article, config=load_config(mini_repo))
     first_digest = digest_tree(first.output_dir)
 
-    second = build_article(article, config=CONFIG)
+    second = build_article(article, config=load_config(mini_repo))
     second_digest = digest_tree(second.output_dir)
 
     assert first_digest == second_digest
@@ -134,9 +152,12 @@ def test_确定性_固定时间后两次构建逐字节一致(
     assert not list(second.output_dir.rglob("*.tmp"))
 
 
-def test_元数据字段与键序稳定() -> None:
-    article = load_article(REAL_ARTICLES[0])
-    outcome = build_article(article, config=CONFIG)
+def test_元数据字段与键序稳定(mini_repo: Path, mini_article: tuple[Path, str]) -> None:
+    index, _ = mini_article
+    article = load_article(index)
+    # 必须用**夹具仓库**的配置：metadata 里的 source 是相对仓库根的路径，
+    # 传真实仓库的配置会让它变成相对真实仓库，路径里就会带上临时目录名。
+    outcome = build_article(article, config=load_config(mini_repo))
     raw = (outcome.output_dir / METADATA_JSON).read_text(encoding="utf-8")
     metadata = json.loads(raw)
 
@@ -161,12 +182,20 @@ def test_元数据字段与键序稳定() -> None:
     assert metadata["platform"] == "wechat"
     # 中文不转义，便于人工查看
     assert "\\u" not in raw
-    # source 用仓库相对路径
-    assert metadata["source"].startswith("articles/")
-    assert not Path(metadata["source"]).is_absolute()
+
+    # source 必须是**相对仓库根**的路径，不能是绝对路径。
+    # 这里真的去 resolve 一次，而不是断言它以某个固定目录名开头——
+    # 后者会把"配置根可以是任意目录"这件事焊死，换个仓库布局就误报。
+    source = metadata["source"]
+    assert not Path(source).is_absolute(), source
+    assert (mini_repo / source).is_file(), f"source 应能在仓库根下找到：{source}"
+    # 不应把仓库根之外的前缀带进来（例如临时目录名）
+    assert not source.startswith(".."), source
 
 
-def test_渲染选项被记录且与产物一致() -> None:
+def test_渲染选项被记录且与产物一致(
+    mini_repo: Path, mini_article: tuple[Path, str]
+) -> None:
     """样式会不断调整，产物里必须能查到"当时用的是哪套选项"。
 
     记录值必须与产物里真正写入的值一致——不一致比不记录更糟，
@@ -174,8 +203,9 @@ def test_渲染选项被记录且与产物一致() -> None:
     """
     import re
 
-    article = load_article(REAL_ARTICLES[0])
-    outcome = build_article(article, config=CONFIG)
+    index, _ = mini_article
+    article = load_article(index)
+    outcome = build_article(article, config=load_config(mini_repo))
     metadata = json.loads((outcome.output_dir / METADATA_JSON).read_text(encoding="utf-8"))
     options = metadata["render_options"]
 
@@ -218,30 +248,35 @@ def test_渲染选项被记录且与产物一致() -> None:
         assert f"margin-bottom:{spacing}" in style
 
 
-def test_产物_HTML_记录主题名() -> None:
+def test_产物_HTML_记录主题名(mini_repo: Path, mini_article: tuple[Path, str]) -> None:
     """只拿到一个 HTML 文件时，也应能判断它是哪个主题渲染的。"""
-    article = load_article(REAL_ARTICLES[0])
-    outcome = build_article(article, config=CONFIG)
+    index, _ = mini_article
+    article = load_article(index)
+    outcome = build_article(article, config=load_config(mini_repo))
 
     for name in (ARTICLE_HTML, PREVIEW_HTML):
         html = (outcome.output_dir / name).read_text(encoding="utf-8")
         assert read_theme_from_html(html) == theme_name(CONFIG), name
 
 
-def test_指定主题时记录的值随主题变化() -> None:
+def test_指定主题时记录的值随主题变化(
+    mini_repo: Path, mini_article: tuple[Path, str]
+) -> None:
     """临时换主题构建，产物与记录都要跟着变。
 
     注意：两次构建写的是同一个产物目录，因此必须在**每次构建后立刻**读取
     它自己返回的 metadata，不能等两次都建完再去读文件——那样读到的是后一次的覆盖结果。
     """
-    article = load_article(REAL_ARTICLES[0])
+    index, _ = mini_article
+    article = load_article(index)
+    config = load_config(mini_repo)
 
-    default_options = build_article(article, config=CONFIG).metadata["render_options"]
-    other_options = build_article(article, config=CONFIG, theme="generous").metadata[
+    default_options = build_article(article, config=config).metadata["render_options"]
+    other_options = build_article(article, config=config, theme="generous").metadata[
         "render_options"
     ]
 
-    assert default_options["theme"] == theme_name(CONFIG)
+    assert default_options["theme"] == theme_name(config)
     assert other_options["theme"] == "generous"
     assert other_options["body_line_height"] != default_options["body_line_height"]
 
@@ -288,12 +323,13 @@ def test_缺图片时拒绝构建(mini_repo: Path) -> None:
     assert not article.errors
 
     with pytest.raises(BuildError, match="IMG001|IMG003|封面"):
-        build_article(article, config=load_config(mini_repo))
+        build_article(article, config=CONFIG)
 
 
-def test_预览页带手机宽度外壳() -> None:
-    article = load_article(REAL_ARTICLES[0])
-    outcome = build_article(article, config=CONFIG)
+def test_预览页带手机宽度外壳(mini_repo: Path, mini_article: tuple[Path, str]) -> None:
+    index, _ = mini_article
+    article = load_article(index)
+    outcome = build_article(article, config=load_config(mini_repo))
     preview = (outcome.output_dir / PREVIEW_HTML).read_text(encoding="utf-8")
     assert "max-width:430px" in preview
     assert "viewport" in preview
@@ -303,10 +339,11 @@ def test_预览页带手机宽度外壳() -> None:
     assert "<script" not in preview
 
 
-def test_产物清单为相对路径() -> None:
+def test_产物清单为相对路径(mini_repo: Path, mini_article: tuple[Path, str]) -> None:
     """绝对路径既泄漏本机目录结构，也让清单无法跨机器复用。"""
-    article = load_article(REAL_ARTICLES[0])
-    outcome = build_article(article, config=CONFIG)
+    index, _ = mini_article
+    article = load_article(index)
+    outcome = build_article(article, config=load_config(mini_repo))
     for relative in outcome.files:
         assert not relative.is_absolute(), relative
         assert (outcome.output_dir / relative).exists(), relative

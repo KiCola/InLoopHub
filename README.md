@@ -274,15 +274,14 @@ git push
 
 <!-- inloop:index:begin -->
 
-共 5 篇。
+共 4 篇。
 
 | ID | 日期 | 栏目 | 标题 | 状态 | 标签 |
 |---|---|---|---|---|---|
 | 001 | 2026-09-20 | 科研生活 | [开篇：为什么我要把技术内容做成一个仓库](articles/2026/001-hello-inloop/index.md) | published | 内容管理、写作、工作流 |
 | 002 | 2026-09-25 | 论文拆解 | [Light-O1：20Hz 人形基础模型到底意味着什么](articles/2026/002-light-o1/index.md) | review | Humanoid、Robot Learning、Foundation Model |
 | 003 | 2026-09-23 | 实验日志 | [RoboDojo 复现记录：从数据集到可训练策略](articles/2026/003-robodojo/index.md) | review | 复现、数据集、模仿学习 |
-| 004 | 2026-09-24 | 源码深挖 | [G1 抓取任务复盘：一次失败的策略与三条可用的经验](articles/2026/004-g1-reaching/index.md) | draft | 抓取、Sim2Real、调试 |
-| 005 | 2026-09-25 | 研究随想 | [示例：我的实战练习](articles/2026/005-practice-run/index.md) | draft | 练习 |
+| 006 | 2026-09-25 | 研究随想 | [Try](articles/2026/006-try/index.md) | published | try |
 
 <!-- inloop:index:end -->
 

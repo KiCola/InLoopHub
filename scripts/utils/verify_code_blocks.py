@@ -48,45 +48,72 @@ def product_blocks(html: str) -> list[str]:
 
 
 def main() -> int:
+    # 自动发现仓库里的文章，而不是硬编码清单：
+    # articles/ 是作者的内容目录，篇数与名字都会变；
+    # 写死清单的结果是删掉文章后脚本还在找不存在的文件。
+    year_dirs = sorted((REPO_ROOT / "articles").glob("[0-9][0-9][0-9][0-9]"))
+    if not year_dirs:
+        print("✗ articles/ 下没有找到年份目录")
+        return 1
+
+    index_files = [
+        path for year in year_dirs for path in sorted(year.glob("[0-9]*-*/index.md"))
+    ]
+    if not index_files:
+        print("✗ articles/ 下没有找到文章")
+        return 1
+
     failures = 0
-    for slug in ("001-hello-inloop", "002-light-o1", "003-robodojo", "004-g1-reaching"):
-        index = REPO_ROOT / "articles/2026" / slug / "index.md"
+    checked = 0
+    for index in index_files:
+        slug = index.parent.name
         product = REPO_ROOT / "dist/wechat" / slug / "article.html"
-        if not index.is_file() or not product.is_file():
-            print(f"跳过 {slug}（缺文件）")
+        if not product.is_file():
+            # 未构建是正常状态（产物不入库），不算失败
+            print(f"跳过 {slug}（尚未构建，先跑 inloop build-wechat）")
             continue
 
         markdown = index.read_text(encoding="utf-8")
+        # 去掉 front matter 后只取正文里的围栏代码块
         source = source_blocks(markdown.split("---", 2)[-1])
         built = product_blocks(product.read_text(encoding="utf-8"))
 
         if not source:
-            print(f"{slug}: 源文件没有代码块，跳过")
+            print(f"跳过 {slug}（源文件没有代码块）")
             continue
+
+        checked += 1
         if len(source) != len(built):
             print(f"✗ {slug}: 代码块数量不一致 源 {len(source)} / 产物 {len(built)}")
             failures += 1
             continue
 
-        for number, (want, got) in enumerate(zip(source, built, strict=True), start=1):
-            if want == got:
-                continue
+        mismatched = [
+            (number, want, got)
+            for number, (want, got) in enumerate(zip(source, built, strict=True), start=1)
+            if want != got
+        ]
+        if mismatched:
             failures += 1
-            print(f"✗ {slug} 第 {number} 个代码块：产物与源不一致")
-            print(f"   源  : {want[:80]!r}")
-            print(f"   产物: {got[:80]!r}")
+            for number, want, got in mismatched:
+                print(f"✗ {slug} 第 {number} 个代码块：产物与源不一致")
+                print(f"   源  : {want[:80]!r}")
+                print(f"   产物: {got[:80]!r}")
+            continue
 
-        if all(want == got for want, got in zip(source, built, strict=True)):
-            indents = sorted(
-                {
-                    len(line) - len(line.lstrip(" "))
-                    for block in built
-                    for line in block.splitlines()
-                    if line.strip()
-                }
-            )
-            print(f"✓ {slug}: {len(built)} 个代码块逐字符一致，缩进集合 {indents}")
+        indents = sorted(
+            {
+                len(line) - len(line.lstrip(" "))
+                for block in built
+                for line in block.splitlines()
+                if line.strip()
+            }
+        )
+        print(f"✓ {slug}: {len(built)} 个代码块逐字符一致，缩进集合 {indents}")
 
+    if checked == 0:
+        print("✗ 没有可校验的文章（都需要先构建）")
+        return 1
     return 1 if failures else 0
 
 
