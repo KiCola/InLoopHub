@@ -26,6 +26,7 @@ from inloop.renderer.wechat import (  # noqa: E402
     available_themes,
     load_stylesheet,
     render_wechat_html,
+    theme_name,
 )
 
 #: 对照页输出路径
@@ -93,10 +94,14 @@ def budget(period: float, sense: float, actuate: float) -> float:
 
 def main() -> int:
     config = load_config(REPO_ROOT)
-    themes = available_themes(config)
-    if not themes:
+    names = available_themes(config)
+    if not names:
         print("styles/themes/ 下没有主题文件。")
         return 1
+
+    # 当前生效的主题排最前，方便一眼确认默认观感
+    current = theme_name(config)
+    themes = tuple([current, *(n for n in names if n != current)]) if current in names else names
 
     body = normalize_html(render_markdown(SAMPLE).html).html
     frames: list[str] = []
@@ -104,11 +109,18 @@ def main() -> int:
     for theme in themes:
         sheet = load_stylesheet(config, theme)
         rendered = render_wechat_html(body, config=config, stylesheet=sheet).html
-        frames.append(_frame(theme, rendered, warnings=rendered_warnings(rendered)))
-        print(f"  已渲染主题：{theme}")
+        frames.append(
+            _frame(
+                theme,
+                rendered,
+                warnings=rendered_warnings(rendered),
+                current=(theme == current),
+            )
+        )
+        print(f"  已渲染主题：{theme}" + ("（当前默认）" if theme == current else ""))
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(_document(frames, themes), encoding="utf-8", newline="\n")
+    OUTPUT.write_text(_document(frames, themes, current), encoding="utf-8", newline="\n")
     print(f"\n对照页已生成：{OUTPUT.relative_to(REPO_ROOT).as_posix()}")
     print("用浏览器打开即可并排对比；横向滚动查看更多主题。")
     return 0
@@ -122,13 +134,19 @@ def rendered_warnings(html: str) -> str:
     return f"正文纯字数 {len(text)}（越多说明排版越紧凑）"
 
 
-def _frame(theme: str, inner_html: str, *, warnings: str) -> str:
+def _frame(theme: str, inner_html: str, *, warnings: str, current: bool) -> str:
     """把一份渲染结果包成对照页里的一列。"""
     meta_style = "display:block;margin-top:4px;font-size:12px;color:#6b7280;"
+    badge = (
+        '<span style="margin-left:8px;padding:1px 8px;border-radius:10px;'
+        'background:#002fa7;color:#fff;font-size:11px;">当前默认</span>'
+        if current
+        else ""
+    )
     return (
         '<section style="flex:0 0 auto;margin:0 16px 0 0;">'
         f'<header style="{_header_style()}">'
-        f'<strong style="font-size:15px;color:#002fa7;">{theme}</strong>'
+        f'<strong style="font-size:15px;color:#002fa7;">{theme}</strong>{badge}'
         f'<span style="{meta_style}">{warnings}</span>'
         "</header>"
         f'<div style="{_canvas_style()}">{inner_html}</div>'
@@ -152,7 +170,7 @@ def _canvas_style() -> str:
     )
 
 
-def _document(frames: list[str], themes: tuple[str, ...]) -> str:
+def _document(frames: list[str], themes: tuple[str, ...], current: str) -> str:
     body_style = (
         "margin:0;padding:24px;background:#f0f0f3;"
         "font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;"
@@ -162,7 +180,7 @@ def _document(frames: list[str], themes: tuple[str, ...]) -> str:
         "<h1 style=\"margin:0 0 6px 0;font-size:20px;color:#22252b;\">"
         "排版主题对照</h1>"
         "<p style=\"margin:0 0 20px 0;font-size:14px;color:#6b7280;\">"
-        f"共 {len(themes)} 个主题（{'、'.join(themes)}），"
+        f"共 {len(themes)} 个主题，当前默认为 <strong>{current}</strong>（排在最左）。"
         "同一段内容、同一套颜色，只有节奏与卡片形式不同。"
         "每个画布宽度 420px，接近手机阅读宽度。横向滚动可看全部。</p>"
     )

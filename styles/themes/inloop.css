@@ -1,0 +1,130 @@
+/* ==========================================================================
+   主题 · inloop（本项目默认）
+   ==========================================================================
+
+   这是综合选定的主题，由两套候选合成：
+
+   - **标题与正文节奏取自候选 A（紧凑）**：主色数字 + 标题，下方 2px 主色下划线；
+     行高 1.75、段间距 24px。观感控制感强，适合技术内容。
+   - **卡片外形取自候选 B（标准）**：浅底圆角、大内距、无左侧竖线。
+
+   两种卡片仍然互斥：
+   - `> 内容`   → 浅底圆角卡片
+   - `> > 内容` → 深底圆角卡片（引述外部内容）
+
+   若要调整具体数值，改本文件即可；共用颜色在 styles/base.css。
+   ========================================================================== */
+
+.inloop-article {
+  font-size: 15px;
+  line-height: 1.75;
+  letter-spacing: 0.01em;
+}
+
+.inloop-article p {
+  margin: 0 0 24px 0;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+/* 一级标题：主色数字 + 标题同行，下方 2px 主色下划线（候选 A 的形式） */
+.inloop-article h1 {
+  margin: 40px 0 24px 0;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--brand-primary);
+  font-size: 19px;
+  line-height: 1.45;
+  font-weight: 700;
+  color: var(--brand-text);
+}
+
+/* 二级标题：主色数字 + 标题，无额外装饰 */
+.inloop-article h2 {
+  margin: 32px 0 18px 0;
+  font-size: 17px;
+  line-height: 1.45;
+  font-weight: 700;
+  color: var(--brand-primary);
+}
+
+.inloop-article h3 {
+  margin: 24px 0 14px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--brand-text);
+}
+
+.inloop-article h4 {
+  margin: 20px 0 12px 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--brand-secondary-text);
+}
+
+/* 浅底圆角卡片（候选 B 的形式）：大内距、无左竖线 */
+.inloop-article blockquote {
+  margin: 28px 0;
+  padding: 20px 22px;
+  border-radius: 8px;
+}
+
+.inloop-article blockquote p {
+  margin: 0 0 10px 0;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.inloop-article blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* 深底圆角卡片：引述外部内容时使用（正文写作 `> > 引文`）。
+   必须在此覆盖通用 blockquote 的内距与圆角，颜色由 base.css 统一。 */
+.inloop-article blockquote blockquote {
+  padding: 20px 22px;
+  border-radius: 8px;
+  background: var(--brand-dark-bg);
+}
+
+.inloop-article blockquote blockquote p {
+  color: var(--brand-dark-text);
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.inloop-article ul,
+.inloop-article ol {
+  margin: 0 0 24px 0;
+  padding-left: 24px;
+}
+
+.inloop-article li {
+  margin-bottom: 8px;
+  line-height: 1.75;
+}
+
+.inloop-article pre {
+  margin: 24px 0;
+}
+
+.inloop-article table {
+  margin: 24px 0;
+}
+
+.inloop-article hr {
+  margin: 32px 0;
+}
+
+.inloop-article section {
+  margin-top: 36px;
+}
+
+.inloop-article section p {
+  font-size: 14px;
+}
+
+.inloop-article .inloop-caption {
+  margin: -12px 0 24px 0;
+  font-size: 13px;
+  line-height: 1.6;
+}

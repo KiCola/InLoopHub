@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG = load_config(REPO_ROOT)
 
 #: 本仓库提供的主题。新增主题时同步更新，以便每个主题都被测试到。
-EXPECTED_THEMES = ("compact", "generous", "standard")
+EXPECTED_THEMES = ("compact", "generous", "inloop", "standard")
 
 #: 浅底卡片与深底卡片对应的背景色（来自 styles/base.css 的变量）
 LIGHT_CARD_BG = "#f5f7fb"
@@ -86,6 +87,27 @@ def test_主题覆盖基础样式() -> None:
     assert float(generous["line-height"].rstrip("px")) > float(
         compact["line-height"].rstrip("px")
     )
+
+
+def test_默认主题取_紧凑的标题与标准的卡片() -> None:
+    """inloop 主题是两套候选的合成，这里固定住这个组合。
+
+    - 标题：主色下划线（取自 compact）
+    - 浅底卡片：圆角且无左侧竖线（取自 standard）
+    """
+    body = normalize_html(render_markdown("# 标题\n\n> 卡片\n").html).html
+    html = render_wechat_html(
+        body, config=CONFIG, stylesheet=load_stylesheet(CONFIG, "inloop")
+    ).html
+
+    h1 = re.search(r"<h1 style=\"([^\"]*)\"", html)
+    assert h1 is not None
+    assert "border-bottom" in h1.group(1), "默认主题的标题应带下划线"
+
+    card = re.search(r"<blockquote style=\"([^\"]*)\"", html)
+    assert card is not None
+    assert "border-radius" in card.group(1), "默认主题的卡片应为圆角"
+    assert "border-left" not in card.group(1), "默认主题的卡片不应有左侧竖线"
 
 
 def test_未知主题报出可用清单() -> None:

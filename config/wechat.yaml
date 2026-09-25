@@ -22,8 +22,8 @@ wechat:
   # 代码配色主题：light / dark，任务书 §10
   code_theme: "light"
   # 排版主题：对应 styles/themes/<名称>.css，用 `inloop themes` 查看全部
-  # compact 紧凑 / standard 标准 / generous 慷慨
-  theme: "standard"
+  # inloop 项目默认（A 的标题 + B 的卡片）/ compact 紧凑 / standard 标准 / generous 慷慨
+  theme: "inloop"
   # 大图阈值（字节）：超过 warning 给 WARNING，超过 error 给 ERROR，任务书 §11
   image_warning_bytes: 3145728
   image_error_bytes: 8388608

@@ -82,6 +82,8 @@ inloop --help
 | `inloop new --list` | 查看可用模板 |
 | `inloop check articles/2026/002-light-o1` | 校验一篇文章（Front Matter、图片、正文） |
 | `inloop build-wechat articles/2026/002-light-o1` | 生成微信公众号产物 |
+| `inloop build-wechat <文章> --theme generous` | 指定排版主题构建 |
+| `inloop themes` | 列出可用排版主题 |
 | `inloop preview-wechat 002-light-o1` | 构建并启动本地手机宽度预览 |
 | `inloop index` | 重新生成本文索引 |
 | `inloop status <article> ready` | 修改文章状态 |
