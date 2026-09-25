@@ -280,6 +280,44 @@ def level_is_error(level: IssueLevel) -> bool:
     return level is IssueLevel.ERROR
 
 
+def publish_payload(result: object, *, content_root: Path) -> dict[str, Any]:
+    """发布到微信草稿箱的结果。
+
+    ``uploaded_images`` 是「产物内路径 → 微信 URL」的完整映射：
+    调用方据此知道哪些图已托管、正文里替换掉了几处。
+    """
+    from inloop.publishers.wechat_publish import PublishResult
+
+    assert isinstance(result, PublishResult)
+    return {
+        "ok": True,
+        "schema": SCHEMA_VERSION,
+        "content_root": content_root.as_posix(),
+        "draft_media_id": result.draft_media_id,
+        "uploaded_images": result.uploaded_images,
+        "uploaded_cover": result.uploaded_cover,
+        "replaced_images": result.replaced_images,
+        "published_html_path": (
+            result.published_html_path.as_posix() if result.published_html_path else ""
+        ),
+        "warnings": list(result.warnings),
+    }
+
+
+def publish_status_payload(*, configured: bool, source: str = "") -> dict[str, Any]:
+    """报告发布能力是否就绪（供界面决定显示哪种模式）。
+
+    **未配置不是错误**：任务书 §18 的半自动流程本来就是默认状态。
+    因此 ``ok`` 仍为 true，只用 ``configured`` 表达状态。
+    """
+    return {
+        "ok": True,
+        "schema": SCHEMA_VERSION,
+        "configured": configured,
+        "source": source,
+    }
+
+
 def misplaced_content_root_hint(content_root: Path) -> str:
     """如果内容目录看起来"传深了一层"，返回一句提示；否则返回空串。
 

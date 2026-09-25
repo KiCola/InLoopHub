@@ -76,7 +76,19 @@ const CSS = `
   text-overflow: ellipsis;
 }
 .inloop-article-meta { font-size: 11px; color: var(--text-muted); }
-.inloop-article-actions { display: flex; gap: 2px; }
+.inloop-article-actions { display: flex; gap: 2px; align-items: center; }
+
+.inloop-status-select {
+  font-size: 10px;
+  padding: 2px 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+  max-width: 68px;
+}
+.inloop-status-select:hover { color: var(--text-normal); }
 
 .inloop-icon-btn {
   display: inline-flex;
@@ -142,6 +154,7 @@ const CSS = `
 }
 
 .inloop-hint { font-size: 11px; color: var(--text-muted); line-height: 1.7; }
+.inloop-busy { color: var(--text-accent); }
 .inloop-error {
   font-size: 12px;
   color: var(--text-error);

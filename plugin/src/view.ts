@@ -8,7 +8,14 @@
 import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type InloopPlugin from "./main";
 import type { ArticleSummary, BuildResult, ImageEntry } from "./inloop/cli";
+import { STATUSES } from "./inloop/cli";
 import { toVaultPath } from "./obsidian-env";
+import {
+  FRAME_SANDBOX,
+  extractBodyHtml,
+  frameBaseHref,
+  wrapForFrame,
+} from "./preview-utils";
 
 export const VIEW_TYPE_INLOOP_PREVIEW = "inloop-notes-preview";
 
@@ -28,6 +35,16 @@ const CATEGORIES = [
   { value: "research", label: "研究随想" },
   { value: "diary", label: "科研生活" },
 ];
+
+/** 状态的中文标签；值本身保持英文，因为它会写进 front matter */
+const STATUS_LABELS: Record<string, string> = {
+  idea: "想法",
+  researching: "调研中",
+  draft: "草稿",
+  review: "待审",
+  ready: "可发布",
+  published: "已发布",
+};
 
 export class InloopPreviewView extends ItemView {
   private readonly plugin: InloopPlugin;
@@ -196,7 +213,6 @@ export class InloopPreviewView extends ItemView {
       [
         article.id ? String(article.id).padStart(3, "0") : "",
         article.category_label,
-        article.status,
         article.date,
       ]
         .filter(Boolean)
@@ -204,6 +220,28 @@ export class InloopPreviewView extends ItemView {
     );
 
     const actions = row.createDiv({ cls: "inloop-article-actions" });
+
+    // 状态下拉：切换状态是日常高频动作，做成下拉比"打开文件改 front matter"省事得多。
+    // 这也是 Python 侧唯一允许改写文章文件的场景，且只改 status 一行。
+    if (article.parsable) {
+      const select = actions.createEl("select", { cls: "inloop-status-select" });
+      select.title = "切换状态";
+      for (const status of STATUSES) {
+        const option = select.createEl("option", { value: status, text: STATUS_LABELS[status] });
+        if (status === article.status) option.selected = true;
+      }
+      // 当前状态不在已知列表里（作者手改过）时，补一个只读项，避免下拉显示错值
+      if (!(STATUSES as readonly string[]).includes(article.status)) {
+        const option = select.createEl("option", {
+          value: article.status,
+          text: article.status,
+        });
+        option.selected = true;
+      }
+      select.onchange = () => {
+        void this.changeStatus(article, select.value, select);
+      };
+    }
 
     const openBtn = actions.createEl("button", { cls: "inloop-icon-btn", attr: { title: "打开" } });
     setIcon(openBtn, "file-text");
@@ -219,6 +257,22 @@ export class InloopPreviewView extends ItemView {
     return row;
   }
 
+  /** 切换状态；失败时把下拉恢复成原值，不能让界面显示一个没生效的状态 */
+  private async changeStatus(
+    article: ArticleSummary,
+    status: string,
+    select: HTMLSelectElement,
+  ): Promise<void> {
+    try {
+      await this.plugin.setStatusSafe(article.dir_name, status);
+      article.status = status;
+      new Notice(`✓ ${article.dir_name} → ${status}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      new Notice(`切换状态失败：${message}`, 8000);
+      select.value = article.status;
+    }
+  }
   private async openArticle(article: ArticleSummary): Promise<void> {
     const contentRoot = await this.contentRootFromCli();
     const absolute = `${contentRoot}/${article.path}`;
@@ -262,20 +316,30 @@ export class InloopPreviewView extends ItemView {
     // 预览方式：用 Python 构建一次，然后加载产物 HTML。
     // 为什么不自己渲染 Markdown：微信端兼容的 CSS 内联在 Python 里，
     // 两套渲染器必然出现"预览好看、粘过去不一样"。
+    //
+    // 耗时实测：Python 启动约 300ms，构建本身 250–350ms。叠加 400ms 防抖后，
+    // 停止输入到看到预览约 0.9–1.0 秒。长文章不是瓶颈（成本被进程启动主导），
+    // 因此给出明确的进行中提示，而不是让界面静默停住。
+    const busy = host.createDiv({ cls: "inloop-hint inloop-busy", text: "正在渲染…" });
     try {
       const build = await this.plugin.runRaw(["build-wechat", slug]);
       const result = build as unknown as BuildResult;
       const html = await this.readText(result.html_path);
+      busy.remove();
       if (html === null) {
         host.createDiv({ cls: "inloop-error", text: `读不到产物：${result.html_path}` });
         return;
       }
       const body = extractBodyHtml(html);
-      // 用沙箱 iframe 隔离样式：产物的内联样式会与 Obsidian 主题互相污染
       const frame = host.createEl("iframe", { cls: "inloop-frame" });
-      frame.setAttribute("sandbox", "");
-      frame.srcdoc = wrapForFrame(body);
+      // sandbox 不能为空：空 sandbox 会阻止一切 file:// 加载，图片全成坏图。
+      // allow-same-origin 不授予脚本执行权限，仍能隔离样式。
+      frame.setAttribute("sandbox", FRAME_SANDBOX);
+      // base 指向产物目录：产物里的图片是相对路径，没有它就会相对 Obsidian 的
+      // app:// 基址解析而全部失败。
+      frame.srcdoc = wrapForFrame(body, frameBaseHref(result.output_dir));
     } catch (error) {
+      busy.remove();
       const message = error instanceof Error ? error.message : String(error);
       host.createDiv({ cls: "inloop-error", text: `预览失败：${message}` });
     }
@@ -444,26 +508,3 @@ export class InloopPreviewView extends ItemView {
   }
 }
 
-/** 从完整 HTML 里取 body（与 main.ts 的同名逻辑保持一致） */
-function extractBodyHtml(html: string): string {
-  const match = /<body[^>]*>([\s\S]*?)<\/body>/i.exec(html);
-  return match ? (match[1] ?? "").trim() : html.trim();
-}
-
-/**
- * 把正文包进一个最小 HTML 文档供 iframe 显示。
- *
- * 不引外部样式，只给 body 一点留白——产物的样式本来就是全内联的。
- */
-function wrapForFrame(body: string): string {
-  return [
-    "<!DOCTYPE html>",
-    '<html><head><meta charset="utf-8">',
-    "<style>",
-    "html,body{margin:0;padding:0;}",
-    "body{padding:12px;background:#fff;}",
-    "</style></head><body>",
-    body,
-    "</body></html>",
-  ].join("");
-}

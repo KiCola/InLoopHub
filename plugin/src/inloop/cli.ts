@@ -281,6 +281,27 @@ export function deleteArticle(
   return runCli<DeletePreview | Envelope>(options, ["delete", slug, "--yes"]);
 }
 
+/** 文章状态，取值与 Python 侧一致（任务书 §4） */
+export const STATUSES = [
+  "idea",
+  "researching",
+  "draft",
+  "review",
+  "ready",
+  "published",
+] as const;
+export type ArticleStatus = (typeof STATUSES)[number];
+
+/**
+ * 修改文章状态。
+ *
+ * 这是 Python 侧**唯一**允许改写已存在文章文件的场景，且只改 status 一行。
+ * 因此从插件调用它是安全的——不会因为手滑把正文改掉。
+ */
+export function setStatus(options: CliOptions, slug: string, status: string): Promise<Envelope> {
+  return runCli<Envelope>(options, ["status", slug, status], true);
+}
+
 /** 新建文章的输入 */
 export interface NewArticleInput {
   title: string;

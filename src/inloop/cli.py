@@ -834,6 +834,144 @@ def themes() -> None:
     console.print(f"主题清单与调参入口：{themes_readme}")
 
 
+@app.command("publish-wechat")
+def publish_wechat(
+    target: str = typer.Argument(..., help="文章目录、index.md 路径或 slug"),
+    theme: str = typer.Option(
+        None, "--theme", help="排版主题，见 `inloop themes`；默认取 config/wechat.yaml"
+    ),
+) -> None:
+    """把文章发布到微信公众号**草稿箱**（任务书 §19、§25 第 18–19 项）。
+
+    做三件事：上传正文图片换取微信 URL、把正文里的本地路径替换掉、
+    创建草稿。**不群发**——任务书 §18 明确 V1 禁止自动群发。
+
+    两条前提（缺一不可）：
+
+    1. 公众号的 AppID 与 AppSecret
+    2. **本机出口 IP 已加入公众号后台的白名单**
+
+    没配置凭据时会失败并给出配置指引；此时请用 `build-wechat` 走半自动流程。
+    """
+    from inloop.publishers.wechat_api import WechatError
+    from inloop.publishers.wechat_publish import (
+        PublishNotConfigured,
+        credentials_available,
+        publish_article,
+    )
+
+    config = _config_or_fail()
+    content_root = _content_root_or_fail(config)
+
+    if not credentials_available(config.root):
+        # 未配置不是"错误"而是"当前状态"：给出指引而不是堆栈
+        _fail(
+            str(PublishNotConfigured()),
+            code="publish_not_configured",
+        )
+        return
+
+    location, article = _load_article_or_fail(config, content_root, target)
+
+    from inloop.build import BuildError, build_article
+
+    try:
+        outcome = build_article(
+            article, config=config, content_root=content_root, theme=theme
+        )
+    except BuildError as exc:
+        _fail(str(exc), code="build_failed", hint="先运行 `inloop check <slug>` 定位问题。")
+        return
+
+    metadata = outcome.metadata
+    images = metadata.get("images")
+    if not isinstance(images, list):
+        images = []
+
+    if not _json_output():
+        console.print("[bold]发布到公众号草稿箱[/bold]")
+        console.print(f"  文章：{escape(article.title)}")
+        body_images = [
+            e for e in images if isinstance(e, dict) and e.get("kind") == "body"
+        ]
+        console.print(f"  正文图片：{len(body_images)} 张（将逐张上传换取微信 URL）")
+        console.print("  封面：将上传为永久素材")
+        console.print()
+
+    try:
+        result = publish_article(
+            repo_root=config.root,
+            metadata=metadata,
+            output_dir=outcome.output_dir,
+            html_path=outcome.output_dir / "article.html",
+        )
+    except PublishNotConfigured as exc:
+        _fail(str(exc), code="publish_not_configured", hint=exc.hint)
+        return
+    except WechatError as exc:
+        _fail(str(exc), code=exc.code, hint=exc.hint)
+        return
+
+    if _json_output():
+        from inloop import jsonapi
+
+        jsonapi.emit(jsonapi.publish_payload(result, content_root=content_root))
+        _print_warnings(result.warnings)
+        return
+
+    console.print(
+        f"[bold green]✓[/bold green] 已创建草稿（media_id：{result.draft_media_id}）"
+    )
+    console.print(f"  上传图片：{len(result.uploaded_images)} 张")
+    console.print(f"  正文替换：{result.replaced_images} 处图片路径")
+    if result.published_html_path:
+        console.print(f"  回填后的 HTML：{result.published_html_path}")
+    console.print()
+    console.print("  下一步：到公众号后台的「草稿箱」预览确认，再决定是否发布。")
+    _print_warnings(result.warnings)
+
+
+@app.command("publish-status")
+def publish_status() -> None:
+    """查看微信发布能力是否就绪（凭据有没有配好）。
+
+    未配置时**退出码仍为 0**：半自动流程本来就是默认状态，
+    把它当成错误会让人以为工具坏了。
+    """
+    from inloop.publishers.wechat_api import WechatError, load_credentials
+
+    config = _config_or_fail()
+    try:
+        credentials = load_credentials(config.root)
+    except WechatError as exc:
+        _fail(str(exc), code=exc.code, hint=exc.hint)
+        return
+
+    configured = credentials is not None
+    source = credentials.source if credentials else ""
+
+    if _json_output():
+        from inloop import jsonapi
+
+        jsonapi.emit(jsonapi.publish_status_payload(configured=configured, source=source))
+        return
+
+    console.print("[bold]微信发布能力[/bold]")
+    if configured:
+        console.print(f"  [green]已配置[/green]（{credentials.masked() if credentials else ''}）")
+        console.print("  注意：还需要把本机出口 IP 加入公众号后台的 IP 白名单。")
+    else:
+        console.print("  [yellow]未配置[/yellow] — 将使用半自动流程（构建后手动粘贴）")
+        console.print()
+        console.print("  想启用自动创建草稿，二选一：")
+        console.print("    1. 设置环境变量 INLOOP_WECHAT_APPID 与 INLOOP_WECHAT_SECRET")
+        console.print(
+            '    2. 创建 config/wechat.credentials.json：'
+            '{"appid": "wx...", "secret": "..."}'
+        )
+        console.print("  凭据在公众号后台「设置与开发 → 基本配置」查看。")
+
+
 @app.command("preview-wechat")
 def preview_wechat(
     target: str = typer.Argument(..., help="文章目录、index.md 路径或 slug"),

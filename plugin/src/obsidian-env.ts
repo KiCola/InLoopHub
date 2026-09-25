@@ -8,6 +8,7 @@
  */
 
 import type { App } from "obsidian";
+import { stripHtml } from "./preview-utils";
 
 /** 只声明我们用到的部分，避免依赖 obsidian 包是否导出 FileSystemAdapter */
 interface AdapterWithBasePath {
@@ -49,4 +50,41 @@ export async function openWithSystem(path: string): Promise<void> {
     throw new Error("当前环境没有 electron.shell，无法用系统程序打开文件。");
   }
   await electron.shell.openPath(path);
+}
+
+/** 剪贴板写入的结果，用于告诉用户"样式到底写进去了没有" */
+export interface ClipboardOutcome {
+  /** 是否写入了 HTML flavor（微信排版靠它） */
+  wroteHtml: boolean;
+  /** 写入方式，供诊断与提示 */
+  method: "electron" | "navigator-text-only";
+}
+
+/**
+ * 把正文放进剪贴板，**同时写 HTML 与纯文本两种 flavor**。
+ *
+ * 为什么不能用 `navigator.clipboard.writeText()`：
+ * 它只写 `text/plain` 一个 flavor，而**微信编辑器是通过 `text/html` 取得内联样式的**。
+ * 只用 writeText 的话，粘进公众号会丢掉全部排版——那正是这个插件的旗舰功能。
+ *
+ * 因此优先用 Electron 的原生剪贴板（可一次写多个 flavor）。
+ * 拿不到时降级为纯文本，并**明确告知用户样式未写入**——
+ * 静默降级会让人以为"工具就是这样"，而实际是排版丢了。
+ */
+export async function copyRichText(html: string): Promise<ClipboardOutcome> {
+  const electron = require("electron") as {
+    clipboard?: { write: (data: { html?: string; text?: string }) => void };
+  };
+
+  // 纯文本兜底用去标签后的内容，便于粘到不支持 HTML 的地方时仍可读。
+  // stripHtml 与预览模块共用同一实现，避免两处漂移。
+  const plain = stripHtml(html);
+
+  if (electron.clipboard && typeof electron.clipboard.write === "function") {
+    electron.clipboard.write({ html, text: plain });
+    return { wroteHtml: true, method: "electron" };
+  }
+
+  await navigator.clipboard.writeText(plain);
+  return { wroteHtml: false, method: "navigator-text-only" };
 }

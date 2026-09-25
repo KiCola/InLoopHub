@@ -17,6 +17,7 @@ import {
   deleteArticle,
   listArticles,
   runCli,
+  setStatus,
   type BuildResult,
   type CliOptions,
 } from "./inloop/cli";
@@ -30,7 +31,7 @@ import {
 } from "./settings";
 import { VIEW_TYPE_INLOOP_PREVIEW, InloopPreviewView } from "./view";
 import { installStyles } from "./styles";
-import { openWithSystem, vaultBasePath } from "./obsidian-env";
+import { openWithSystem, copyRichText, vaultBasePath } from "./obsidian-env";
 
 export default class InloopPlugin extends Plugin {
   settings: InloopSettings = { ...DEFAULT_SETTINGS };
@@ -84,8 +85,11 @@ export default class InloopPlugin extends Plugin {
     ) as unknown as () => void;
 
     this.registerEvent(
-      this.app.workspace.on("editor-change", () => {
-        if (this.isActiveArticle(this.app.workspace.getActiveFile())) {
+      this.app.workspace.on("editor-change", (_editor, info) => {
+        // 用回调给的 info.file 而不是 workspace.getActiveFile()：
+        // 多面板时"活动文件"未必是正在编辑的那个，info.file 才是权威来源。
+        // （独立审核核对了 MarkdownFileInfo 接口：get file(): TFile | null）
+        if (this.isActiveArticle(info.file)) {
           this.refreshSoon?.();
         }
       }),
@@ -157,8 +161,9 @@ export default class InloopPlugin extends Plugin {
 
   async activatePreview(): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_INLOOP_PREVIEW);
-    const leaf: WorkspaceLeaf =
-      existing[0] ?? this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
+    // getRightLeaf 已被 obsidian.d.ts 标注 deprecated；getLeaf(false) 等价且不废弃。
+    // false 表示"不要新建分割"，即复用已有叶子。
+    const leaf: WorkspaceLeaf = existing[0] ?? this.app.workspace.getLeaf(false);
     await leaf.setViewState({ type: VIEW_TYPE_INLOOP_PREVIEW, active: true });
     this.app.workspace.revealLeaf(leaf);
     this.refreshPreview();
@@ -234,14 +239,27 @@ export default class InloopPlugin extends Plugin {
       }
 
       const body = extractBody(html);
-      await navigator.clipboard.writeText(body);
+      // 必须同时写入 HTML flavor：微信编辑器靠 text/html 取得内联样式，
+      // 只用 writeText（纯文本）粘过去会丢掉全部排版。
+      const outcome = await copyRichText(body);
       notice.hide();
 
       const imageHint =
         result.body_images.length > 0
           ? `另有 ${result.body_images.length} 张正文图片需在编辑器里手动上传（见面板里的清单）`
           : "本文没有正文图片";
-      new Notice(`✓ 已复制正文到剪贴板\n${imageHint}`, 8000);
+
+      if (outcome.wroteHtml) {
+        new Notice(`✓ 已复制正文到剪贴板\n${imageHint}`, 8000);
+      } else {
+        // 静默降级最糟：用户会以为"工具就这样"，而实际是排版丢了
+        new Notice(
+          "⚠️ 只写入了纯文本，粘到公众号会**丢失排版**。\n" +
+            "这通常说明当前环境拿不到 Electron 的原生剪贴板。" +
+            `\n${imageHint}`,
+          15000,
+        );
+      }
     } catch (error) {
       notice.hide();
       const message = error instanceof Error ? error.message : String(error);
@@ -292,6 +310,16 @@ export default class InloopPlugin extends Plugin {
   /** 删除文章（界面会先确认） */
   async deleteArticleSafe(slug: string) {
     return deleteArticle(this.cliOptions(), slug);
+  }
+
+  /**
+   * 切换文章状态。
+   *
+   * 这是 Python 侧**唯一**允许改写文章文件的场景，且只改 status 一行——
+   * 因此从插件调用它没有"会不会改坏正文"的顾虑。
+   */
+  async setStatusSafe(slug: string, status: string) {
+    return setStatus(this.cliOptions(), slug, status);
   }
 
   /** 直接调用任意 inloop 子命令（面板的"在工具仓库里查看"等场景） */
