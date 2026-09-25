@@ -3,18 +3,29 @@
 > 记录具身智能、机器人学习、实验过程与科研思考的长期个人技术内容仓库。
 
 **目录**：[这是什么](#这是什么) · [安装](#安装) · [怎么用](#怎么用) ·
-[内容与文章索引](#内容与文章索引) · [栏目](#栏目) · [排版主题](#排版主题) ·
-[目录导航](#目录导航) · [本地开发](#本地开发)
+[Obsidian 插件](#obsidian-插件) · [内容与文章索引](#内容与文章索引) ·
+[栏目](#栏目) · [排版主题](#排版主题) · [目录导航](#目录导航) ·
+[本地开发](#本地开发)
 
 ## 这是什么
 
-一个**内容即代码（Content-as-Code）**的个人技术内容仓库：
+一个**内容即代码（Content-as-Code）**的个人技术内容管理与发布系统：
 
-- **GitHub 仓库是唯一内容源。** 文章以 Markdown 存储，图片与文章就近管理。
+- **内容目录是唯一内容源。** 文章以 Markdown 存储，可以放在任意位置
+  （本机目录、Obsidian 仓库、同步盘，甚至另一个 Git 仓库），**不必放进本仓库**。
 - **微信公众号是第一个渲染目标**，不是终点。后续预留博客、知乎、小红书、Bilibili。
 - **平台适配层与内容源彻底解耦。** 新增平台不修改文章正文结构。
+- **渲染全部在 Python 侧**，并有 [Obsidian 插件](#obsidian-插件)提供界面。
 
 核心目标不是"全自动发公众号"，而是：**让文章内容、素材、状态、构建、发布流程长期可维护。**
+
+> **第一次使用？** 三步走：
+> 1. 按下一节完成安装
+> 2. 用 `inloop info` 确认内容目录，`config/site.yaml` 的 `content.root`
+>    指向你放文章的地方（详见[内容与文章索引](#内容与文章索引)）
+> 3. `inloop new` 建一篇，`inloop preview-wechat` 看效果
+>
+> 仓库自带的 `articles/` 默认是空的——你的文章不在这个仓库里，这是有意的设计。
 
 ## 安装
 
@@ -269,6 +280,27 @@ git push
 | 图片报 `IMG001` | 正文里的路径与实际文件位置不一致 |
 | 预览页图片不显示 | 图片没放进 `assets/`，或路径写错 |
 | 粘贴后样式丢了 | 确认复制的是 `article.html`，且是可视区粘贴而非源码模式 |
+| 看不到我的文章 | 内容目录配错了——用 `inloop info` 看实际解析到哪、来源是哪一级 |
+
+## Obsidian 插件
+
+如果你用 Obsidian 写作，可以装本仓库附带的插件，把上面那些命令变成界面操作：
+**文章列表、新建表单、实时渲染预览、一键构建并复制到公众号、删除**。
+
+```bash
+cd plugin
+npm install
+npm run build
+npm run install-to-vault -- --vault "C:/path/to/your/vault"
+```
+
+它会用**目录联接**把 `plugin/dist/` 挂到 vault 的插件目录，因此改代码后重新构建即可生效，
+vault 里也不会多出 `node_modules` 之类的东西（vault 在同步盘里时这点很重要）。
+
+**插件只做界面，渲染仍是 Python。** 代价是机器上要有 Python 与 `inloop`——
+用 TypeScript 重写一套渲染器会产生"预览好看、粘过去不一样"的问题。
+
+详细说明（配置、发布流程、代码结构、已知限制）见 [plugin/README.md](plugin/README.md)。
 
 ## 内容与文章索引
 
@@ -332,19 +364,21 @@ inloop build-wechat <文章> --theme generous     # 临时指定
 
 | 目录 | 作用 |
 |---|---|
-| `articles/` | 文章正文，唯一内容源 |
-| `drafts/` | 未成文的草稿与想法 |
+| `articles/` | 内容目录的**兜底**位置（通常为空，你的文章放在 `content.root` 指向处） |
+| `examples/` | 随仓库分发的排版示例，测试会自动遍历它们做端到端构建 |
 | `templates/` | 文章模板 |
 | `assets/` | 仓库级共享素材（Logo、通用封面等） |
-| `config/` | 配置：站点信息与微信渲染参数 |
+| `config/` | 配置：站点信息、渲染参数、内容目录位置 |
 | `styles/` | 样式事实源（构建时内联，产物不外链 CSS） |
 | `src/inloop/` | Python 包，全部逻辑所在 |
+| `plugin/` | Obsidian 插件（界面层，渲染仍调用上面的 Python 包） |
 | `scripts/` | CLI 入口薄封装，不承载逻辑 |
 | `tests/` | 自动化测试 |
 | `docs/` | 开发文档 |
 | `dist/` | 构建产物，可随时删除重建 |
 
-每个目录下都有 `README.md` 说明用途与存放规则。
+每个目录下都有 `README.md` 说明用途与存放规则；`plugin/` 除外，
+它的说明在 [plugin/README.md](plugin/README.md)。
 
 ## 如何阅读源码文章
 
@@ -353,13 +387,37 @@ inloop build-wechat <文章> --theme generous     # 临时指定
 
 ## 本地开发
 
+### Python 侧
+
 ```bash
 python -m pytest          # 运行测试
 python -m ruff check .    # 静态检查
 ```
 
-测试会直接对 `articles/` 下的**真实文章**跑完整构建，而不是只用简单样例——
-这样才能发现"简单样例很好看、真正技术文章一塌糊涂"的问题。
+辅助校验脚本（改动渲染器或文档后建议跑一遍）：
+
+```bash
+python scripts/utils/verify_code_blocks.py   # 产物代码块与源 Markdown 逐字符比对
+python scripts/utils/check_doc_links.py      # 文档里的本地链接是否都有效
+python scripts/utils/check_taskbook.py       # 任务书修订后结构是否完整
+```
+
+测试对 `examples/` 下的示例文章跑**完整构建**（参数化用例按实际存在的文章展开），
+而不是只用简单样例——这样才能发现"简单样例很好看、真正技术文章一塌糊涂"的问题。
+**你自己的文章不在这个范围内**，需要用 `inloop check --all` 主动校验。
+
+### 插件侧
+
+```bash
+cd plugin
+npm install
+npm run check      # 类型检查 + 构建 + 冒烟测试
+npm run dev        # watch 模式，改代码即重建
+```
+
+`npm run smoke` 会真的调用 Python 内核跑一遍 list / check / build，
+并验证错误码与提示是否按要求映射——插件与内核之间只有 JSON 契约这一层粘合，
+而这一层出错在类型层面看不出来。
 
 架构说明（Article Model、Parser、Renderer、微信适配、素材流水线、发布接口）
 见 [docs/architecture.md](docs/architecture.md)。
