@@ -1,0 +1,71 @@
+/* ==========================================================================
+   InLoop 手记 —— 代码块配色（样式事实源）
+   ==========================================================================
+
+   与 wechat.css 的关系：wechat.css 定义代码块的**布局**（背景、内距、圆角、
+   等宽字体、横向滚动），本文件只定义**语法着色**。
+
+   任务书 §10 允许深色或浅灰背景。本文件默认浅灰底 + 克制的语法色，
+   理由：微信端浅底在大屏手机上对比度更稳定，且粘贴后不易被编辑器的
+   深色模式反转。若要切换为深色主题，改 config/wechat.yaml 的 code_theme
+   并在此补一组深色规则，不要在代码里硬编码颜色。
+
+   着色由可选的 Pygments 承载（任务书 §21 可选依赖）。当 Pygments 不可用时，
+   构建脚本必须降级为「无高亮的 pre」而不是报错（AGENTS.md §5）。
+   ========================================================================== */
+
+/* 注释：次要灰 */
+.highlight .c,
+.highlight .c1,
+.highlight .cm {
+  color: #6b7280;
+  font-style: italic;
+}
+
+/* 关键字：品牌主色，视觉重心轻 */
+.highlight .k,
+.highlight .kd,
+.highlight .kn,
+.highlight .kc {
+  color: #002fa7;
+  font-weight: 600;
+}
+
+/* 字符串：低饱和绿 */
+.highlight .s,
+.highlight .s1,
+.highlight .s2,
+.highlight .sb {
+  color: #1f6f4a;
+}
+
+/* 数字与常量 */
+.highlight .m,
+.highlight .mi,
+.highlight .mf {
+  color: #8a4b08;
+}
+
+/* 函数名 */
+.highlight .nf,
+.highlight .fm {
+  color: #3730a3;
+}
+
+/* 类型与类名 */
+.highlight .nc,
+.highlight .nn {
+  color: #7c2d12;
+}
+
+/* 运算符与标点：接近正文色 */
+.highlight .o,
+.highlight .p {
+  color: #22252b;
+}
+
+/* 出错：显式可见，不静默 */
+.highlight .err {
+  color: #b91c1c;
+  background: #fef2f2;
+}

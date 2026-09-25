@@ -1,0 +1,26 @@
+# InLoop 手记 —— 微信公众号渲染配置
+# 依据：任务书 §20 的键名保持不变，仅追加任务书 §10、§11 要求的必要键。
+# 构建脚本必须从本文件读取这些值，不得在代码中硬编码。
+
+wechat:
+  # 正文字号（px），任务书 §10 建议 16
+  font_size: 16
+  # 正文行高倍数，任务书 §10 建议 1.75 - 1.9
+  line_height: 1.8
+  # 标题样式：numbered —— 形如「01 · Problem」，见任务书 §10
+  heading_style: "numbered"
+  # 是否把样式全部内联进产物，任务书 §9.2 要求 inline style
+  inline_css: true
+  # 图片最大宽度（百分比），任务书 §10 要求 max-width: 100%
+  image_max_width: 100
+
+  # --- 以下为任务书 §10、§11 要求但在 §20 示例中未列出的键 ---
+  # 段间距（px），任务书 §10 要求段间距明显
+  paragraph_spacing: 20
+  # 代码字号（px），需在手机宽度下可读
+  code_font_size: 13
+  # 代码配色主题：light / dark，任务书 §10
+  code_theme: "light"
+  # 大图阈值（字节）：超过 warning 给 WARNING，超过 error 给 ERROR，任务书 §11
+  image_warning_bytes: 3145728
+  image_error_bytes: 8388608

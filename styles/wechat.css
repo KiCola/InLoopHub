@@ -1,0 +1,214 @@
+/* ==========================================================================
+   InLoop 手记 —— 微信公众号正文样式（样式事实源）
+   ==========================================================================
+
+   本文件的双重角色：
+
+   1. **设计依据的唯一文字出处**：任务书 §9.3、§10 定下的配色与排版规则记录
+      在这里的注释中，改样式时紧挨着改依据，不会出现「代码改了、文档没改」。
+   2. **构建时的内联来源**：产物必须只有 inline style，不允许外链 CSS
+      （任务书 §9.2）。因此构建脚本读取本文件、解析成「选择器 → 声明」映射，
+      再逐元素写入 style 属性。
+
+   两条红线（任务书 §9.2、AGENTS.md §11）：
+
+   - 不得依赖 JavaScript、外部 CSS、复杂 CSS 选择器、iframe。
+   - 不得引入只在浏览器里成立、粘进微信编辑器就失效的机制。
+
+   单位约定：正文排版一律用 px，避免微信编辑器改写 em/rem 造成比例错乱。
+
+   选择器约定（重要）：
+
+   - 只使用**元素/后代选择器**（如 `p`、`blockquote p`），不要给元素加 class。
+     产物要求零 class：微信编辑器不受控的样式重写会以 class 为突破口，
+     而且 class 本身在粘贴后可能被丢弃。
+   - `.inloop-article` 不是样式挂载点，而是构建产物里包住正文的**粘贴范围标记**，
+     构建脚本把样式展开到其内部的元素上，产物中不保留该 class。
+     `body` 选择器同样只用于本地预览外壳，微信会剥掉 body 上的样式。
+   ========================================================================== */
+
+:root {
+  /* 品牌主色：克莱茵蓝 Klein Blue（任务书 §9.3） */
+  --brand-primary: #002fa7;
+  /* 正文与次要文字（任务书 §9.3） */
+  --brand-text: #22252b;
+  --brand-secondary-text: #6b7280;
+  --brand-background: #ffffff;
+  /* 引用块：极浅蓝灰底 + 主色左竖线（任务书 §10） */
+  --brand-quote-bg: #f5f7fb;
+  /* 代码块：浅灰底，手机端可读性优于深色（任务书 §10） */
+  --brand-code-bg: #f7f8fa;
+  --brand-border: #e5e7eb;
+}
+
+/* 正文容器：宽松排版，适合移动端阅读（任务书 §9.3） */
+.inloop-article {
+  font-size: 16px;
+  line-height: 1.8;
+  color: var(--brand-text);
+  background: var(--brand-background);
+  /* 中文字体族：微信端以系统字体为主，不引入外部字体文件 */
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0.02em;
+  word-break: break-word;
+}
+
+/* 段落：段间距明显（任务书 §10） */
+.inloop-article p {
+  margin: 0 0 20px 0;
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+/* 一级标题：形如「01 · Problem」，不用花哨图标（任务书 §10） */
+.inloop-article h1 {
+  margin: 36px 0 18px 0;
+  font-size: 20px;
+  line-height: 1.5;
+  font-weight: 700;
+  color: var(--brand-text);
+}
+
+/* 二级标题：左侧短线缩进，克制（任务书 §10） */
+.inloop-article h2 {
+  margin: 30px 0 14px 0;
+  padding-left: 12px;
+  border-left: 4px solid var(--brand-primary);
+  font-size: 18px;
+  line-height: 1.5;
+  font-weight: 700;
+  color: var(--brand-text);
+}
+
+.inloop-article h3 {
+  margin: 24px 0 12px 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--brand-primary);
+}
+
+.inloop-article h4 {
+  margin: 20px 0 10px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--brand-secondary-text);
+}
+
+/* 引用：主色左竖线 + 极浅蓝灰底，不加引号装饰（任务书 §10） */
+.inloop-article blockquote {
+  margin: 20px 0;
+  padding: 14px 16px;
+  border-left: 4px solid var(--brand-primary);
+  background: var(--brand-quote-bg);
+  color: var(--brand-text);
+}
+
+.inloop-article blockquote p {
+  margin: 0 0 8px 0;
+}
+
+.inloop-article blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* 列表：缩进清晰，行距与正文一致 */
+.inloop-article ul,
+.inloop-article ol {
+  margin: 0 0 20px 0;
+  padding-left: 24px;
+}
+
+.inloop-article li {
+  margin-bottom: 8px;
+  line-height: 1.8;
+}
+
+/* 图片：max-width 100%、居中、上下留白（任务书 §10） */
+.inloop-article img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 24px auto;
+}
+
+/* 图片说明文字：由构建脚本按 alt 自动生成（任务书 §10） */
+.inloop-article .inloop-caption {
+  margin: -12px 0 24px 0;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--brand-secondary-text);
+}
+
+/* 行内代码：与正文区分但不喧宾夺主 */
+.inloop-article code {
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--brand-code-bg);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 14px;
+  color: var(--brand-primary);
+}
+
+/* 代码块：等宽、可横向滚动、适配手机（任务书 §10） */
+.inloop-article pre {
+  margin: 20px 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  border-radius: 4px;
+  background: var(--brand-code-bg);
+  border: 1px solid var(--brand-border);
+}
+
+.inloop-article pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--brand-text);
+  white-space: pre;
+}
+
+/* 表格：可读、有边框、不撑破手机宽度 */
+.inloop-article table {
+  width: 100%;
+  margin: 20px 0;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.inloop-article th {
+  padding: 8px 10px;
+  border: 1px solid var(--brand-border);
+  background: var(--brand-quote-bg);
+  font-weight: 700;
+  text-align: left;
+  color: var(--brand-text);
+}
+
+.inloop-article td {
+  padding: 8px 10px;
+  border: 1px solid var(--brand-border);
+  color: var(--brand-text);
+}
+
+/* 链接：用主色，不带下划线以免正文显得凌乱 */
+.inloop-article a {
+  color: var(--brand-primary);
+  text-decoration: none;
+}
+
+/* 分割线：极细，仅作视觉停顿 */
+.inloop-article hr {
+  margin: 32px 0;
+  border: none;
+  border-top: 1px solid var(--brand-border);
+}
+
+/* 加粗：只加粗，不用颜色，保持克制 */
+.inloop-article strong {
+  font-weight: 700;
+  color: var(--brand-text);
+}

@@ -1,0 +1,20 @@
+# InLoop 手记 —— 站点与品牌配置
+# 依据：任务书 §20
+# 修改本文件后无需改动代码，构建脚本会在每次运行时重新读取。
+
+site:
+  name: "InLoop 手记"
+  author: "Zero Zhao"
+  description: "记录具身智能、机器人学习、实验过程与科研思考的长期个人技术内容仓库"
+
+brand:
+  # 品牌主色：克莱茵蓝 Klein Blue
+  primary: "#002FA7"
+  text: "#22252B"
+  secondary_text: "#6B7280"
+  background: "#FFFFFF"
+  # 引用块背景：极浅蓝灰，配合主色左竖线使用
+  quote_background: "#F5F7FB"
+  # 代码块背景：浅灰，微信端可读性优于深色底
+  code_background: "#F7F8FA"
+  border: "#E5E7EB"
