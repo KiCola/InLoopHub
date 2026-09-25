@@ -1,7 +1,7 @@
 """一次性检查：任务书经过多轮修订后结构是否仍然完整。
 
 检查项：
-- 章节编号连续
+- 章节编号连续（顶层 `## N.` 与子节 `### N.M`）
 - 围栏代码块成对
 - 关键改动确实写进去了
 - 没有残留的过时表述
@@ -15,6 +15,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FENCE = "`" * 3
+
+#: 顶层章节应覆盖的编号范围
+TOP_LEVEL_RANGE = range(1, 32)
+
+#: 子节中**必须存在**的（新增功能必须在任务书里有依据，
+#: 否则按 AGENTS.md 第 6 行"需求只从任务书取"，实现就成了无据可依）
+REQUIRED_SUBSECTIONS = ("7.3", "7.4", "7.5")
 
 
 def main() -> int:
@@ -31,11 +38,20 @@ def main() -> int:
 
     problems = 0
 
-    # 1. 章节编号
+    # 1. 顶层章节编号
     numbers = [int(m) for m in re.findall(r"(?m)^## (\d+)\.", text)]
-    missing = [n for n in range(1, 32) if n not in numbers]
-    print(f"章节：找到 {len(numbers)} 个 —— {'✓ 1-31 齐全' if not missing else f'✗ 缺 {missing}'}")
+    missing = [n for n in TOP_LEVEL_RANGE if n not in numbers]
+    verdict = "✓ 1-31 齐全" if not missing else f"✗ 缺 {missing}"
+    print(f"顶层章节：找到 {len(numbers)} 个 —— {verdict}")
     problems += bool(missing)
+
+    # 1b. 新增功能的子节必须有依据
+    subsections = set(re.findall(r"(?m)^### (\d+\.\d+)", text))
+    missing_subs = [s for s in REQUIRED_SUBSECTIONS if s not in subsections]
+    present = "、".join(REQUIRED_SUBSECTIONS)
+    verdict = f"✓ {present} 存在" if not missing_subs else f"✗ 缺 {missing_subs}"
+    print(f"必需子节：{verdict}")
+    problems += bool(missing_subs)
 
     # 2. 代码块成对
     fences = len(re.findall(rf"(?m)^{FENCE}", text))

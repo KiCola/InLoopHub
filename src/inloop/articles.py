@@ -1,18 +1,28 @@
-"""文章的扫描、编号分配与新建。
+"""文章的扫描、编号分配、新建与删除。
 
 职责边界：
 
-- **负责**：在 ``articles/`` 下发现文章、分配新编号、新建文章目录与文件。
+- **负责**：在 ``content_root`` 下发现文章、分配新编号、新建与删除文章目录。
 - **不负责**：front matter 的语义（在 :mod:`inloop.models.article`）、
   模板填充细节（在 :mod:`inloop.templates`）、命令行交互（在 :mod:`inloop.cli`）。
 
-编号策略：``id`` 在**整个仓库范围内唯一且递增**，不按年份重置。这样它能作为
-稳定的排序键，也不会因为换年出现重复编号。
+**内容的两个根**（任务书 §3，2026-09-25 起）：
+
+- ``content_root``：**文章**所在目录，由 :meth:`Config.resolve_content_root` 解析，
+  可以位于任意位置（Obsidian 仓库、同步目录、另一个 Git 仓库）。
+- ``repo_root``：**工具**仓库根，模板、样式、配置都在这里。
+
+两者**没有包含关系**，因此凡是既要用文章又要用模板的函数（如 ``create_article``）
+都必须同时接收它们——不要试图从一个推出另一个。
+
+编号策略：``id`` 在**整个内容目录范围内唯一且递增**，不按年份重置。
+这样它能作为稳定的排序键，也不会因为换年出现重复编号。
 """
 
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -27,7 +37,7 @@ from inloop.models.article import (
 from inloop.models.serializer import write_article
 from inloop.templates import Template, load_template, render_template_text
 
-#: 文章根目录名（相对仓库根）
+#: 兜底的内容目录名（相对工具仓库根），与 :data:`inloop.config.DEFAULT_CONTENT_DIR` 一致
 ARTICLES_DIR = "articles"
 
 #: 文章正文文件名
@@ -36,9 +46,20 @@ ARTICLE_FILENAME = "index.md"
 #: 封面默认文件名
 COVER_FILENAME = "cover.png"
 
+#: 文章目录下的配图目录名
+ASSETS_DIR = "assets"
+
 
 class ArticleCreationError(ValueError):
     """文章无法创建（目录已存在、模板缺失、取值非法等）。"""
+
+
+class ArticleNotFoundError(ValueError):
+    """按给定定位串找不到文章。"""
+
+
+class ArticleDeletionError(ValueError):
+    """文章无法删除（目录不合法、外部因素阻止删除）。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,21 +116,44 @@ class NewArticleResult:
     template: Template
 
 
+@dataclass(frozen=True, slots=True)
+class DeleteResult:
+    """删除文章的结果。
+
+    Attributes:
+        location: 被删除的文章位置。
+        files: 被删除的文件清单（相对文章目录）。
+            先收集再删除，否则删完就统计不出删掉了什么。
+        image_count: 其中的图片数量，用于在确认界面上提醒"会连带删掉几张图"。
+        total_bytes: 被删除文件的总字节数。
+    """
+
+    location: ArticleLocation
+    files: tuple[str, ...]
+    image_count: int
+    total_bytes: int
+
+
 # --- 扫描与编号 -----------------------------------------------------------
 
 
-def articles_root(root: Path) -> Path:
-    """返回文章根目录。"""
-    return root / ARTICLES_DIR
+def articles_root(content_root: Path) -> Path:
+    """返回文章根目录。
+
+    参数已经是**内容目录本身**（由 :meth:`Config.resolve_content_root` 解析），
+    因此这里直接返回它，不再拼接 ``articles/``——拼接会把"内容目录可以任意指定"
+    这件事抹掉。
+    """
+    return content_root
 
 
-def find_articles(root: Path) -> tuple[ArticleLocation, ...]:
-    """扫描 ``articles/``，返回全部文章位置，按编号排序。
+def find_articles(content_root: Path) -> tuple[ArticleLocation, ...]:
+    """扫描内容目录，返回全部文章位置，按编号排序。
 
-    只认含 ``index.md`` 的**两级**目录（``articles/<年份>/<文章>/``），
+    只认含 ``index.md`` 的**两级**目录（``<content_root>/<年份>/<文章>/``），
     与任务书 §3 的结构一致。编号为 None 的目录排在最后。
     """
-    base = articles_root(root)
+    base = articles_root(content_root)
     if not base.is_dir():
         return ()
 
@@ -135,37 +179,92 @@ def find_articles(root: Path) -> tuple[ArticleLocation, ...]:
     return tuple(found)
 
 
-def next_article_id(root: Path) -> int:
+def next_article_id(content_root: Path) -> int:
     """计算下一个可用编号。
 
     以「已有最大编号 + 1」为准，而不是「文章数量 + 1」——删掉中间某篇后
     再新建，不会复用已用过的编号。
     """
-    numbers = [loc.number for loc in find_articles(root) if loc.number is not None]
+    numbers = [loc.number for loc in find_articles(content_root) if loc.number is not None]
     return max(numbers) + 1 if numbers else 1
 
 
-def find_by_slug(root: Path, slug: str) -> ArticleLocation | None:
+def find_by_slug(content_root: Path, slug: str) -> ArticleLocation | None:
     """按 slug 查找文章目录。"""
-    for location in find_articles(root):
+    for location in find_articles(content_root):
         if location.slug == slug or location.dir_name == slug:
             return location
     return None
+
+
+def resolve_article(content_root: Path, target: str) -> ArticleLocation:
+    """把用户给的定位串解析成文章位置。
+
+    接受三种写法，便于用户从文件树里直接复制：
+
+    1. slug 或目录名：``002-light-o1``
+    2. 指向文章**目录**的路径
+    3. 指向 ``index.md`` 的路径
+
+    Args:
+        content_root: 内容目录。
+        target: 用户输入的定位串。
+
+    Returns:
+        文章位置。
+
+    Raises:
+        ArticleNotFoundError: 找不到对应文章。
+    """
+    candidates: list[ArticleLocation] = []
+    # 1) slug / 目录名
+    by_slug = find_by_slug(content_root, target)
+    if by_slug is not None:
+        candidates.append(by_slug)
+
+    # 2) 路径形式（可能相对当前目录，也可能是绝对路径）
+    path = Path(target)
+    try:
+        resolved = path.resolve()
+    except OSError:  # pragma: no cover - 极少数非法路径字符
+        resolved = path
+
+    for location in find_articles(content_root):
+        if resolved in (location.directory.resolve(), location.index.resolve()):
+            candidates.append(location)
+
+    if not candidates:
+        available = "、".join(loc.dir_name for loc in find_articles(content_root))
+        raise ArticleNotFoundError(
+            f"找不到文章：`{target}`\n"
+            f"  内容目录：{content_root}\n"
+            f"  已有文章：{available or '（暂无）'}\n"
+            f"修正方法：传入 slug（推荐，最短）、文章目录或其 index.md 路径。"
+        )
+
+    # 写 slug 时可能同时按 1 与 2 命中同一篇，这里去重
+    unique: list[ArticleLocation] = []
+    for location in candidates:
+        if location not in unique:
+            unique.append(location)
+    return unique[0]
 
 
 # --- 新建 -----------------------------------------------------------------
 
 
 def create_article(
-    root: Path,
+    content_root: Path,
+    repo_root: Path,
     request: NewArticleRequest,
     *,
     make_cover: bool = True,
 ) -> NewArticleResult:
-    """在仓库中新建一篇文章。
+    """新建一篇文章。
 
     Args:
-        root: 仓库根。
+        content_root: 内容目录——新文章写在这里。
+        repo_root: 工具仓库根——模板从这里读。两个根没有包含关系，必须分别传入。
         request: 新建参数。
         make_cover: 是否生成封面占位图。
 
@@ -201,19 +300,19 @@ def create_article(
         )
 
     # 同 slug 已存在时拒绝，避免出现两篇同名文章导致产物目录互相覆盖
-    existing = find_by_slug(root, slug)
+    existing = find_by_slug(content_root, slug)
     if existing is not None:
         raise ArticleCreationError(
             f"已存在 slug 为 `{slug}` 的文章：{existing.directory}\n"
             "修正方法：换一个 slug，或直接编辑已有文章。"
         )
 
-    template = load_template(root, request.template)
-    article_id = next_article_id(root)
+    template = load_template(repo_root, request.template)
+    article_id = next_article_id(content_root)
     status = request.status or template.default_status
     today = date.today()
 
-    directory = articles_root(root) / str(request.year) / f"{article_id:03d}-{slug}"
+    directory = articles_root(content_root) / str(request.year) / f"{article_id:03d}-{slug}"
     if directory.exists():
         raise ArticleCreationError(
             f"目标目录已存在：{directory}\n"
@@ -263,6 +362,76 @@ def create_article(
         slug=slug,
     )
     return NewArticleResult(article=article, location=location, template=template)
+
+
+def delete_article(content_root: Path, location: ArticleLocation) -> DeleteResult:
+    """删除一篇文章（整个文章目录）。
+
+    **这是破坏性操作**：文章的正文、封面与配图一起删除，因此在 CLI 层必须先让
+    用户确认（见 ``inloop delete`` 的确认流程）。本函数只负责"确认之后真正删掉"。
+
+    内容目录通常不在 Git 里（作者可能用坚果云之类的同步盘），没有提交历史可回滚，
+    所以调用方**不得**在未经确认的情况下调用本函数。
+
+    Args:
+        content_root: 内容目录。
+        location: 要删除的文章位置。
+
+    Returns:
+        删除结果，含被删文件清单与配图数量。
+
+    Raises:
+        ArticleDeletionError: 目标不在内容目录内，或删除过程中被外部因素阻止。
+    """
+    directory = location.directory.resolve()
+    base = content_root.resolve()
+
+    # 安全检查：只允许删除内容目录**内部**的文章目录。
+    # 防止误传（例如目标被解析到了内容目录本身、或指向了内容目录外面的路径）
+    # 造成删除范围远超预期。
+    if directory == base or not directory.is_relative_to(base):
+        raise ArticleDeletionError(
+            f"拒绝删除：目标不在内容目录内。\n"
+            f"  目标：{directory}\n"
+            f"  内容目录：{base}\n"
+            f"修正方法：确认传入的是某篇文章的目录，而不是内容目录本身或目录外的路径。"
+        )
+
+    if not directory.is_dir():
+        raise ArticleDeletionError(
+            f"文章目录不存在（可能已被删除）：{directory}\n"
+            f"修正方法：运行 `inloop list` 查看当前实际存在的文章。"
+        )
+
+    # 先收集清单再删除：删完就统计不出"删掉了什么"了
+    files: list[str] = []
+    image_count = 0
+    total_bytes = 0
+    for path in sorted(directory.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(directory).as_posix()
+        files.append(relative)
+        total_bytes += path.stat().st_size
+        if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+            image_count += 1
+
+    try:
+        shutil.rmtree(directory)
+    except OSError as exc:
+        raise ArticleDeletionError(
+            f"删除失败：{directory}\n"
+            f"原始错误：{exc}\n"
+            f"修正方法：确认没有程序（编辑器、同步盘、预览服务）正在占用这些文件，"
+            f"关闭后重试；若目录被同步盘锁定，可稍后再试。"
+        ) from exc
+
+    return DeleteResult(
+        location=location,
+        files=tuple(files),
+        image_count=image_count,
+        total_bytes=total_bytes,
+    )
 
 
 def _template_values(

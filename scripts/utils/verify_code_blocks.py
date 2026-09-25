@@ -47,20 +47,30 @@ def product_blocks(html: str) -> list[str]:
     return blocks
 
 
-def main() -> int:
-    # 自动发现仓库里的文章，而不是硬编码清单：
-    # articles/ 是作者的内容目录，篇数与名字都会变；
-    # 写死清单的结果是删掉文章后脚本还在找不存在的文件。
-    year_dirs = sorted((REPO_ROOT / "articles").glob("[0-9][0-9][0-9][0-9]"))
-    if not year_dirs:
-        print("✗ articles/ 下没有找到年份目录")
-        return 1
+def find_article_indexes() -> list[Path]:
+    """找出要核对的文章（按内容目录顺序）。
 
-    index_files = [
-        path for year in year_dirs for path in sorted(year.glob("[0-9]*-*/index.md"))
-    ]
+    内容与工具解耦后，仓库里能出现文章的地方有两处：
+
+    - ``articles/``：``content_root`` 的兜底位置（本机未配置时写作落在这里）
+    - ``examples/``：随仓库分发的排版示例，测试与演示用
+
+    两处都扫，避免"只认一个目录"导致删掉示例后脚本还去找不存在的文件
+    （这正是上一版的问题）。
+    """
+    found: list[Path] = []
+    for base in (REPO_ROOT / "articles", REPO_ROOT / "examples"):
+        if not base.is_dir():
+            continue
+        for year in sorted(p for p in base.iterdir() if p.is_dir()):
+            found.extend(sorted(year.glob("[0-9]*-*/index.md")))
+    return found
+
+
+def main() -> int:
+    index_files = find_article_indexes()
     if not index_files:
-        print("✗ articles/ 下没有找到文章")
+        print("✗ 在 articles/ 与 examples/ 下都没有找到文章")
         return 1
 
     failures = 0

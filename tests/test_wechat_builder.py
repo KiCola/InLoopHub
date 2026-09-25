@@ -39,8 +39,21 @@ from inloop.rendering import read_theme_from_html
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG = load_config(REPO_ROOT)
 
-#: 仓库内真实文章目录，按任务书 §28 的计划
-REAL_ARTICLES = sorted((REPO_ROOT / "articles" / "2026").glob("[0-9]*-*/index.md"))
+#: 仓库内的**示例**文章目录（任务书 §28）。
+#:
+#: 内容与工具已解耦（任务书 §3）：作者的真实文章位于 ``content_root``（可能在
+#: Obsidian 仓库里），不在本仓库内。这里用 ``examples/`` 里的排版示例做端到端验证——
+#: 它们覆盖代码块、公式降级、表格、深浅卡片、图片等写法，
+#: 正是任务书 §28 要求的"不要只用简单样例"。
+#:
+#: 参数化用例**按实际存在的文章自动展开**：新增示例会被自动纳入校验，
+#: 删掉示例会让覆盖变少——这是有意的，见 test_示例文章数量未减少。
+EXAMPLES_ROOT = REPO_ROOT / "examples"
+REAL_ARTICLES = sorted(EXAMPLES_ROOT.glob("[0-9]*/[0-9]*-*/index.md"))
+
+#: 示例文章的最少数量。写死它是为了**防止覆盖被悄悄削弱**：
+#: 迁移目录、改 glob 都可能让参数化用例静默变少，而测试全绿会掩盖这件事。
+MIN_EXAMPLE_ARTICLES = 3
 
 
 def load_article(index: Path) -> Article:
@@ -57,16 +70,19 @@ def digest_tree(directory: Path) -> dict[str, str]:
     return result
 
 
-def test_仓库中存在可校验的真实文章() -> None:
-    """至少要有一篇真实文章作为端到端验证的对象。
+def test_示例文章数量未减少() -> None:
+    """示例文章是端到端验证的对象，数量不能悄悄变少。
 
-    这里**不再硬编码"至少 4 篇"**：`articles/` 是作者的内容目录，篇数会随写作
-    增减，把篇数写进测试会让"删掉自己的旧文章"变成一次测试失败。
-    真正要守住的是"有真实文章可测"，而不是"必须是 4 篇"。
+    为什么要卡一个下限：参数化用例是**按实际存在的文章展开**的，
+    迁移目录、改 glob、误删文件都会让用例数静默变少，而"测试全绿"会掩盖这件事。
+    这里用下限把它变成显式失败——覆盖被削弱时必须有人知道。
 
-    校验覆盖所有存在的文章，因此作者每新增一篇，都会被自动纳入校验。
+    校验覆盖 ``examples/`` 下每一篇，因此新增示例会被自动纳入。
     """
-    assert REAL_ARTICLES, "articles/ 下没有文章，端到端验证失去了对象"
+    assert len(REAL_ARTICLES) >= MIN_EXAMPLE_ARTICLES, (
+        f"示例文章只剩 {len(REAL_ARTICLES)} 篇（下限 {MIN_EXAMPLE_ARTICLES}）："
+        f"{[p.parent.name for p in REAL_ARTICLES]}"
+    )
 
 
 @pytest.mark.parametrize("index", REAL_ARTICLES, ids=lambda p: p.parent.name)
@@ -183,13 +199,14 @@ def test_元数据字段与键序稳定(mini_repo: Path, mini_article: tuple[Pat
     # 中文不转义，便于人工查看
     assert "\\u" not in raw
 
-    # source 必须是**相对仓库根**的路径，不能是绝对路径。
+    # source 必须是**相对内容目录**的路径，不能是绝对路径。
     # 这里真的去 resolve 一次，而不是断言它以某个固定目录名开头——
-    # 后者会把"配置根可以是任意目录"这件事焊死，换个仓库布局就误报。
+    # 后者会把"内容目录可以是任意目录"这件事焊死，换个布局就误报。
     source = metadata["source"]
     assert not Path(source).is_absolute(), source
-    assert (mini_repo / source).is_file(), f"source 应能在仓库根下找到：{source}"
-    # 不应把仓库根之外的前缀带进来（例如临时目录名）
+    # 文章位于 <content_root>/<年份>/<文章>/index.md，因此相对路径形如 2026/.../index.md
+    assert (mini_repo / source).is_file(), f"source 应能在内容目录下找到：{source}"
+    # 不应把内容目录之外的前缀带进来（例如临时目录名）
     assert not source.startswith(".."), source
 
 
@@ -282,7 +299,7 @@ def test_指定主题时记录的值随主题变化(
 
 
 def test_有_ERROR_时拒绝构建且不产出文件(mini_repo: Path) -> None:
-    index = mini_repo / "articles" / "2026" / "001-bad" / "index.md"
+    index = mini_repo / "2026" / "001-bad" / "index.md"
     index.parent.mkdir(parents=True)
     index.write_text("---\nid: 1\ntitle: \"\"\n---\n# 标题\n", encoding="utf-8")
 
@@ -297,7 +314,7 @@ def test_有_ERROR_时拒绝构建且不产出文件(mini_repo: Path) -> None:
 
 def test_缺图片时拒绝构建(mini_repo: Path) -> None:
     """正文引用的图片不存在时，构建必须中止而不是产出一个缺图的产物。"""
-    index = mini_repo / "articles" / "2026" / "007-test-article" / "index.md"
+    index = mini_repo / "2026" / "007-test-article" / "index.md"
     index.parent.mkdir(parents=True)
     index.write_text(
         "---\n"

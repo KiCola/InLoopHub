@@ -18,3 +18,30 @@ brand:
   # 代码块背景：浅灰，微信端可读性优于深色底
   code_background: "#F7F8FA"
   border: "#E5E7EB"
+
+# 内容与产物位置（任务书 §3.3）
+#
+# 文章与工具是**解耦**的：文章可以放在任意位置——本机任意目录、Obsidian 仓库、
+# 坚果云等同步目录，甚至另一个 Git 仓库。本工具仓库不要求存放你的文章。
+#
+# 内容目录按以下优先级解析，靠前的优先：
+#   1. 命令行参数  --content <路径>
+#   2. 环境变量    INLOOP_CONTENT
+#   3. 本文件      content.root
+#   4. 兜底        工具仓库内的 articles/
+#
+# 因此本文件可以完全不写 content 段：临时用就传 --content，
+# 本机长期用就设环境变量，开源用户则在这里配置一次。
+content:
+  # 你的内容目录。留空或删掉本行会回退到工具仓库内的 articles/。
+  #
+  # 示例（注意 Windows 路径用正斜杠或双反斜杠，避免 YAML 转义）：
+  #   root: "C:/Users/me/Nutstore/.../InLoopPub"
+  #   root: 'D:\我的文章'
+  root: ""
+
+  # 构建产物目录。默认 dist/（已在 .gitignore 中排除）。
+  # 产物是可再生的派生物，可以随时删除重建。
+  #
+  # 示例：dist: "D:/inloop-dist"
+  dist: ""

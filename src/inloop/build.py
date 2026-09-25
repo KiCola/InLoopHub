@@ -42,7 +42,7 @@ from inloop.renderer.wechat import (
 )
 from inloop.rendering import RenderOptions, collect_render_options, theme_meta_tag
 
-#: 产物根目录名（相对仓库根）
+#: 产物根目录名（相对仓库根）。实际位置由 Config.resolve_dist_root() 决定。
 DIST_DIR = "dist"
 #: 平台子目录名
 WECHAT_DIR = "wechat"
@@ -87,6 +87,7 @@ def build_article(
     config: Config | None = None,
     article_dir: Path | None = None,
     root: Path | None = None,
+    content_root: Path | None = None,
     theme: str | None = None,
 ) -> BuildOutcome:
     """构建一篇微信公众号文章。
@@ -95,7 +96,9 @@ def build_article(
         article: 文章模型。
         config: 配置；为 None 时自动加载。
         article_dir: 文章所在目录；为 None 时由 ``article.source`` 推断。
-        root: 仓库根；为 None 时由配置推断。
+        root: 工具仓库根；为 None 时由配置推断。
+        content_root: 内容目录；为 None 时由 ``article.source`` 推断。
+            metadata 里的路径都相对它书写，因此传错会让产物带上错误前缀。
         theme: 排版主题名；为 None 时取配置里的 ``wechat.theme``。
 
     Returns:
@@ -105,8 +108,11 @@ def build_article(
         BuildError: 校验失败、配置缺失或素材处理出现致命问题。
     """
     resolved_config = config or load_config(root)
-    repo_root = resolved_config.root
     resolved_article_dir = _resolve_article_dir(article, article_dir)
+    # 内容目录：优先用调用方显式传入的值，否则从文章自身位置推出来。
+    # 这个值决定 metadata 里的路径该怎么写，因此必须准确——
+    # 推导失败会退化成绝对路径并泄漏本机目录结构，见 _relative_reference()。
+    resolved_content_root = content_root or _infer_content_root(article)
 
     if not article.is_valid:
         detail = "\n".join(f"  {issue.render(article.source)}" for issue in article.errors)
@@ -116,7 +122,7 @@ def build_article(
             f"修正方法：先运行 `inloop check {_short(article.source)}` 定位并修复问题。"
         )
 
-    output_dir = repo_root / DIST_DIR / WECHAT_DIR / article.directory_name
+    output_dir = resolved_config.resolve_dist_root() / WECHAT_DIR / article.directory_name
 
     # 1) 正文 Markdown → HTML 片段
     rendered = render_markdown(article.body)
@@ -182,8 +188,8 @@ def build_article(
     output_dir.mkdir(parents=True, exist_ok=True)
     metadata = build_metadata(
         article,
-        repo_root=repo_root,
-        image_manifest=build_image_manifest(assets, repo_root=repo_root),
+        content_root=resolved_content_root,
+        image_manifest=build_image_manifest(assets, content_root=resolved_content_root),
         render_options=render_options,
     )
 
@@ -222,7 +228,7 @@ def build_article(
 def build_metadata(
     article: Article,
     *,
-    repo_root: Path,
+    content_root: Path,
     image_manifest: list[dict[str, object]],
     render_options: RenderOptions,
 ) -> dict[str, object]:
@@ -232,17 +238,15 @@ def build_metadata(
     ``render_options`` 记录本次生效的排版选项，使观感可复现。
     ``images`` 是结构化清单（序号、产物路径、源路径、体积、尺寸、所属节、图注），
     既是将来上传换地址的依据，也是人工插图时的顺序表。
+
+    **路径一律相对 ``content_root``**。内容与工具分离后，文章位于 ``content_root``
+    而不是工具仓库内，用工具仓库根去算相对路径会失败——过去那种"失败就回退成
+    绝对路径"的写法会把 ``C:\\Users\\...`` 写进产物，既泄漏本机目录结构，
+    又让同一篇文章在两台机器上产出不同结果（AGENTS.md §4）。
     """
-    source = article.source
-    # 用绝对路径比较：article.source 可能是相对路径（取决于调用方怎么构造 Article），
-    # 直接 relative_to 会抛 ValueError 而不是给出可读的错误。
     source_reference = ""
-    if source is not None:
-        try:
-            source_reference = source.resolve().relative_to(repo_root.resolve()).as_posix()
-        except ValueError:
-            # 不在仓库内：保留原样总比崩掉好，同时这本身值得注意
-            source_reference = source.as_posix()
+    if article.source is not None:
+        source_reference = _relative_reference(article.source, content_root, "文章正文")
     return {
         "title": article.title,
         "summary": article.summary,
@@ -261,6 +265,52 @@ def build_metadata(
         "render_options": render_options.as_metadata(),
         "generated_at": _generated_at(),
     }
+
+
+def _relative_reference(path: Path, base: Path, what: str) -> str:
+    """把路径写成相对 ``base`` 的形式。
+
+    **算不出相对路径时报错，而不是回退成绝对路径。** 绝对路径会让产物带上
+    机器相关信息：泄漏本机目录结构、换台机器产物就变、可复现性失效。
+
+    Args:
+        path: 要记录的路径。
+        base: 相对基准（这里是 ``content_root``）。
+        what: 出错时用于说明"这是谁的路径"。
+
+    Returns:
+        POSIX 风格的相对路径。
+
+    Raises:
+        BuildError: 路径不在基准目录之下。
+    """
+    try:
+        return path.resolve().relative_to(base.resolve()).as_posix()
+    except ValueError as exc:
+        raise BuildError(
+            f"{what}不在内容目录之下，无法写成相对路径：\n"
+            f"  文件：{path}\n"
+            f"  内容目录：{base}\n"
+            f"修正方法：确认 `content_root` 指向的是这篇文章所在的文章根目录"
+            f"（即包含年份目录的那一层），而不是它的上级或下级。"
+            f"可用 `inloop info` 查看当前解析到的内容目录及其来源。"
+        ) from exc
+
+
+def _infer_content_root(article: Article) -> Path:
+    """从文章位置推出内容目录。
+
+    结构是 ``<content_root>/<年份>/<文章目录>/index.md``，因此从正文文件
+    向上三级即内容目录。这是**兜底**：能由调用方显式传 ``content_root`` 时应优先传，
+    显式传入才能保证"读的是哪个目录"没有歧义。
+    """
+    if article.source is None:
+        raise BuildError(
+            "无法确定内容目录：文章没有记录来源路径。\n"
+            "修正方法：用 `inloop build-wechat <slug>` 构建，"
+            "或显式传入 content_root。"
+        )
+    return article.source.resolve().parent.parent.parent
 
 
 def _generated_at() -> str:
@@ -282,31 +332,26 @@ def _generated_at() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def build_image_manifest(assets: AssetResult, *, repo_root: Path) -> list[dict[str, object]]:
+def build_image_manifest(assets: AssetResult, *, content_root: Path) -> list[dict[str, object]]:
     """构造图片清单（AGENTS.md §11 第 2 条要求的结构化清单）。
 
     图片必须以**独立文件 + 结构化清单**进入产物，供将来上传到平台换取地址后
     回填正文；同时这份清单也是人在微信编辑器里逐张插图时的依据——
     只给文件名，人无法判断该插在哪一节之后。
 
-    清单里的路径一律相对仓库根，不写绝对路径（AGENTS.md §4）。
+    清单里的路径一律相对 ``content_root``，不写绝对路径（AGENTS.md §4）。
+    源路径算不出相对形式时**报错**，见 :func:`_relative_reference`。
     """
     manifest: list[dict[str, object]] = []
     for index, asset in enumerate(assets.assets, start=1):
-        try:
-            source_reference = asset.source_path.resolve().relative_to(
-                repo_root.resolve()
-            ).as_posix()
-        except ValueError:
-            # 不在仓库内：保留原样总比崩掉好
-            source_reference = asset.source_path.as_posix()
-
         manifest.append(
             {
                 "order": index,
                 "kind": "cover" if not asset.from_markdown else "body",
                 "output": asset.output_relative.as_posix(),
-                "source": source_reference,
+                "source": _relative_reference(
+                    asset.source_path, content_root, f"图片 `{asset.output_relative.as_posix()}`"
+                ),
                 "byte_size": asset.byte_size,
                 "width": asset.width,
                 "height": asset.height,

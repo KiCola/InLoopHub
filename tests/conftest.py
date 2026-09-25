@@ -84,15 +84,19 @@ def article_text() -> str:
 
 @pytest.fixture()
 def mini_repo(tmp_path: Path) -> Iterator[Path]:
-    """构造一个最小可运行仓库。
+    """构造一个最小可运行的工具仓库。
 
     复制真实的 ``styles/``、``config/``、``templates/`` 与 ``pyproject.toml``：
     这些都是构建的必要输入，且必须用真实版本，否则测的就不是真实行为。
+
+    **不创建 ``articles/``**：内容与工具已解耦（任务书 §3），夹具把文章直接放在
+    仓库根的年份目录下（``<tmp>/2026/...``），于是仓库根本身就是内容目录。
+    这与 ``content_root`` 的兜底语义一致（兜底是 ``<repo>/articles``，
+    但当配置或参数指向别处时，文章就长在别处）。
     """
     for name in ("styles", "config", "templates"):
         shutil.copytree(REPO_ROOT / name, tmp_path / name)
     shutil.copy2(REPO_ROOT / "pyproject.toml", tmp_path / "pyproject.toml")
-    (tmp_path / "articles" / "2026").mkdir(parents=True)
     yield tmp_path
 
 
@@ -100,13 +104,14 @@ def mini_repo(tmp_path: Path) -> Iterator[Path]:
 def mini_article(mini_repo: Path) -> tuple[Path, str]:
     """在最小仓库中写入一篇文章，返回 (index.md 路径, 文章文本)。
 
+    文章放在 ``<mini_repo>/2026/007-test-article/``——即"仓库根就是内容目录"。
     返回 **index.md 的路径**而不是文章目录：调用方几乎总是要读这个文件来
-    构造 :class:`Article`，返回目录会迫使每个调用方自己拼 `/ "index.md"`。
+    构造 :class:`Article`，返回目录会迫使每个调用方自己拼 ``/ "index.md"``。
     需要目录时用 ``index.parent``。
     """
     from PIL import Image
 
-    article_dir = mini_repo / "articles" / "2026" / "007-test-article"
+    article_dir = mini_repo / "2026" / "007-test-article"
     (article_dir / "assets").mkdir(parents=True)
     Image.new("RGB", (600, 300), (0, 47, 167)).save(article_dir / "assets" / "pic.png")
     Image.new("RGB", (1175, 500), (0, 47, 167)).save(article_dir / "cover.png")

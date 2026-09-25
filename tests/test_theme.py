@@ -130,7 +130,11 @@ def test_主题名取自配置() -> None:
 
     # 缺 theme 键时退回默认主题，而不是崩溃
     partial = Config(
-        root=CONFIG.root, site=CONFIG.site, brand=CONFIG.brand, wechat={"font_size": 16}
+        root=CONFIG.root,
+        site=CONFIG.site,
+        brand=CONFIG.brand,
+        wechat={"font_size": 16},
+        content={},
     )
     assert theme_name(partial) == DEFAULT_THEME
 
