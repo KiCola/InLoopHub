@@ -9,11 +9,12 @@ import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type InloopPlugin from "./main";
 import type { ArticleSummary, BuildResult, ImageEntry } from "./inloop/cli";
 import { STATUSES } from "./inloop/cli";
-import { readTextFile, toVaultPath } from "./obsidian-env";
+import { readBinaryFile, readTextFile, toVaultPath } from "./obsidian-env";
 import {
   FRAME_SANDBOX,
   extractBodyHtml,
   frameBaseHref,
+  inlineImages,
   wrapForFrame,
 } from "./preview-utils";
 
@@ -370,6 +371,21 @@ export class InloopPreviewView extends ItemView {
       busy.remove();
       const body = extractBodyHtml(html);
 
+      // 把图片内联成 data URI 再放进 iframe。
+      // 原因见 preview-utils.inlineImages 的说明：Obsidian 的 app:// 父级下，
+      // sandbox iframe 是不透明源，加载 file:// 子资源会被拦掉，
+      // 表现为"文字全对、图片空白"。data URI 不走 file://，不受影响。
+      const inlined = inlineImages(body, result.output_dir, readBinaryFile);
+      if (inlined.skipped > 0 && inlined.inlined === 0) {
+        host.createDiv({
+          cls: "inloop-hint",
+          text:
+            `正文有 ${inlined.skipped} 张图片没能内联进预览` +
+            "（文件读不到或体积超过 4MB）。预览里可能看到裂图，" +
+            "但产物本身正常——用「在浏览器打开」可以看完整效果。",
+        });
+      }
+
       const frame = host.createEl("iframe", { cls: "inloop-frame" });
       // **用 srcdoc，不要用 src 指向 file://。**
       //
@@ -381,8 +397,9 @@ export class InloopPreviewView extends ItemView {
       // 图片全成坏图（这条由探针实测确认）。
       frame.setAttribute("sandbox", FRAME_SANDBOX);
       // base 指向产物目录：产物里的图片是相对路径，没有它就会相对 Obsidian 的
-      // app:// 基址解析而全部失败。
-      frame.srcdoc = wrapForFrame(body, frameBaseHref(result.output_dir));
+      // app:// 基址解析而全部失败。（内联成功时用不到，但保留它能让
+      // 未内联的图片仍有机会解析。）
+      frame.srcdoc = wrapForFrame(inlined.html, frameBaseHref(result.output_dir));
     } catch (error) {
       busy.remove();
       const message = error instanceof Error ? error.message : String(error);

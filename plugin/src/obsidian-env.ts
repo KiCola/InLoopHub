@@ -53,6 +53,24 @@ export async function openWithSystem(path: string): Promise<void> {
 }
 
 /**
+ * 读一个二进制文件；失败时返回 null（调用方自行降级）。
+ *
+ * 与 :func:`readTextFile` 的区别：图片内联进预览时"读不到"不该中断整个预览——
+ * 少一张图仍应把文字显示出来，因此这里不抛异常。
+ */
+export function readBinaryFile(path: string): Uint8Array | null {
+  try {
+    const fs = require("node:fs") as {
+      readFileSync?: (target: string) => Uint8Array;
+    };
+    if (typeof fs.readFileSync !== "function") return null;
+    return fs.readFileSync(path);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 读一个文本文件；失败时**抛出带原因的异常**。
  *
  * 为什么不返回 `null` 表示失败：那样调用方只能说"读不到产物"，

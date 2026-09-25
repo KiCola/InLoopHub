@@ -45,6 +45,102 @@ export function frameBaseHref(outputDir: string): string {
   return `file://${normalized.startsWith("/") ? "" : "/"}${normalized}/`;
 }
 
+/** 单张图内联进预览的上限；超过就保留原路径（预览可能裂图，但不撑爆 iframe） */
+export const INLINE_IMAGE_LIMIT_BYTES = 4 * 1024 * 1024;
+
+/**
+ * 把预览 HTML 里的本地图片换成 data URI。
+ *
+ * ## 为什么必须这么做
+ *
+ * 预览用 `<iframe srcdoc>` 承载产物 HTML。而 **Obsidian 的渲染进程基于
+ * `app://obsidian.md`**；当 iframe 带 `sandbox="allow-same-origin"` 时，
+ * Chromium 在父级不是标准源的情况下**不会**把父级源交给 iframe，
+ * iframe 于是成为**不透明源（opaque origin）**。
+ * 不透明源去加载 `file://` 子资源会被源策略/CSP 拦掉——
+ * 表现就是：**文字与样式全对，图片一片空白，连占位高度都没有**（用户实测）。
+ *
+ * 我用 headless Chrome 反复验证过 `srcdoc + <base href>` 能显示图片，
+ * 但那是**顶层 `file://` 页面里的 iframe**，与 Obsidian 的 `app://` 父级不同源，
+ * 因此那条结论不适用于 Obsidian。data URI 不走 file://，**不受这条策略影响**。
+ *
+ * ## 为什么不违反"禁止内联图片"的约束
+ *
+ * 任务书禁止的是把图片内联进**构建产物**——那会让图片无法上传到平台换取地址、
+ * 堵死后续的自动发布。这里改的只是**插件预览时临时构造的 HTML 字符串**，
+ * 不落盘、不影响 `article.html` / `metadata.json`，产物里的图片仍然是独立文件
+ * 且带结构化清单。
+ *
+ * @param body 正文 HTML 片段
+ * @param outputDir 产物目录（图片相对于它）
+ * @param readBinary 读二进制文件的回调，由调用方注入（便于测试）
+ * @returns 替换后的 HTML 与替换张数
+ */
+export function inlineImages(
+  body: string,
+  outputDir: string,
+  readBinary: (path: string) => Uint8Array | null,
+): { html: string; inlined: number; skipped: number } {
+  let inlined = 0;
+  let skipped = 0;
+
+  const base = outputDir.replace(/\\/g, "/").replace(/\/+$/, "");
+  const html = body.replace(/<img\b[^>]*>/gi, (tag) => {
+    const match = /\bsrc\s*=\s*"([^"]*)"/i.exec(tag);
+    if (!match) return tag;
+    const src = match[1];
+    // 外链、data URI、绝对 URL 都不动
+    if (!src || /^(https?:|data:|\/\/)/i.test(src)) return tag;
+
+    // src 是 URL，磁盘路径要解码（含空格与中文时会被百分号编码）
+    const decoded = decodeURIComponent(src);
+    const bytes = readBinary(`${base}/${decoded}`);
+    if (!bytes || bytes.length === 0 || bytes.length > INLINE_IMAGE_LIMIT_BYTES) {
+      skipped += 1;
+      return tag;
+    }
+    const encoded = base64FromBytes(bytes);
+    if (!encoded) {
+      skipped += 1;
+      return tag;
+    }
+    inlined += 1;
+    const dataUri = `data:${mimeForPath(decoded)};base64,${encoded}`;
+    return tag.replace(match[0], `src="${dataUri}"`);
+  });
+
+  return { html, inlined, skipped };
+}
+
+/** 按扩展名给 MIME；认不出时用通用二进制类型（浏览器仍会按内容嗅探） */
+export function mimeForPath(path: string): string {
+  const lower = path.toLowerCase();
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".bmp")) return "image/bmp";
+  if (lower.endsWith(".svg")) return "image/svg+xml";
+  if (lower.endsWith(".avif")) return "image/avif";
+  return "application/octet-stream";
+}
+
+/** 字节数组 → base64。不依赖 Buffer/btoa 的存在性，手写实现。 */
+export function base64FromBytes(bytes: Uint8Array): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i] ?? 0;
+    const b1 = bytes[i + 1];
+    const b2 = bytes[i + 2];
+    out += alphabet[b0 >> 2];
+    out += alphabet[((b0 & 0x03) << 4) | ((b1 ?? 0) >> 4)];
+    out += b1 === undefined ? "=" : alphabet[((b1 & 0x0f) << 2) | ((b2 ?? 0) >> 6)];
+    out += b2 === undefined ? "=" : alphabet[b2 & 0x3f];
+  }
+  return out;
+}
+
 /**
  * 把正文包进最小 HTML 文档供 iframe 显示。
  *

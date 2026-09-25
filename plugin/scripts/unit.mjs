@@ -148,6 +148,100 @@ console.log("pathToFileUrl 已移除；frameBaseHref 的路径转换规则（预
   check("结果一定以斜杠结尾（拼接相对路径必需）", utils.frameBaseHref("E:/a").endsWith("/"));
 }
 
+console.log("");
+console.log("inlineImages（把图片内联成 data URI，绕过 Obsidian 的 file:// 限制）");
+{
+  // 一张最小的 1x1 PNG
+  const png = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  ]);
+  const files = new Map([
+    ["E:/out/images/a.png", png],
+    ["E:/out/images/屏幕 截图.png", png],
+  ]);
+  const readBinary = (p) => files.get(p) ?? null;
+
+  const body = '<p>x</p><img src="images/a.png"><img src="https://ex.com/b.png">';
+
+  const r1 = utils.inlineImages(body, "E:/out", readBinary);
+  check("本地图片被换成 data URI", r1.html.includes("data:image/png;base64,"), r1.html.slice(0, 120));
+  check("替换计数正确", r1.inlined === 1, String(r1.inlined));
+  check("外链图片不动", r1.html.includes('src="https://ex.com/b.png"'));
+  check("文字内容保留", r1.html.includes("<p>x</p>"));
+
+  // src 是 URL，含空格与中文的路径必须先解码再当文件路径用
+  const r2 = utils.inlineImages(
+    '<img src="images/%E5%B1%8F%E5%B9%95%20%E6%88%AA%E5%9B%BE.png">',
+    "E:/out",
+    readBinary,
+  );
+  check("URL 编码的路径先解码再定位（含空格与中文）", r2.inlined === 1, String(r2.inlined));
+
+  // 读不到时保留原样并计数，不该抛异常（少一张图也要把文字显示出来）
+  const r3 = utils.inlineImages('<img src="images/none.png">', "E:/out", readBinary);
+  check("读不到时保留原 src", r3.html.includes('src="images/none.png"'), r3.html);
+  check("读不到时计入 skipped", r3.skipped === 1, String(r3.skipped));
+  check("读不到时不抛异常", r3.inlined === 0);
+
+  // 超过上限的图片跳过
+  const big = new Uint8Array(utils.INLINE_IMAGE_LIMIT_BYTES + 1);
+  const r4 = utils.inlineImages('<img src="images/big.png">', "E:/out", (p) =>
+    p.endsWith("big.png") ? big : null,
+  );
+  check("超过体积上限的图片跳过（不撑爆 iframe）", r4.skipped === 1 && r4.inlined === 0);
+
+  // data URI 与已有内联不该被二次处理
+  const r5 = utils.inlineImages('<img src="data:image/png;base64,AAAA">', "E:/out", readBinary);
+  check("已是 data URI 的不再处理", r5.inlined === 0 && r5.skipped === 0, r5.html);
+}
+
+console.log("");
+console.log("base64FromBytes");
+{
+  // 用已知答案校验手写实现
+  check("空数组 → 空串", utils.base64FromBytes(new Uint8Array([])) === "");
+  check(
+    "'M' (0x4D) → TQ==",
+    utils.base64FromBytes(new Uint8Array([0x4d])) === "TQ==",
+    utils.base64FromBytes(new Uint8Array([0x4d])),
+  );
+  check(
+    "'Ma' → TWE=",
+    utils.base64FromBytes(new Uint8Array([0x4d, 0x61])) === "TWE=",
+    utils.base64FromBytes(new Uint8Array([0x4d, 0x61])),
+  );
+  check(
+    "'Man' → TWFu",
+    utils.base64FromBytes(new Uint8Array([0x4d, 0x61, 0x6e])) === "TWFu",
+    utils.base64FromBytes(new Uint8Array([0x4d, 0x61, 0x6e])),
+  );
+  // 与 Buffer 对照（Node 环境有 Buffer，可作为参照实现）
+  const sample = new Uint8Array([0, 1, 2, 253, 254, 255, 128, 64, 32]);
+  check(
+    "与 Buffer.toString('base64') 一致",
+    utils.base64FromBytes(sample) === Buffer.from(sample).toString("base64"),
+    utils.base64FromBytes(sample),
+  );
+}
+
+console.log("");
+console.log("mimeForPath");
+{
+  const cases = [
+    ["a.png", "image/png"],
+    ["a.JPG", "image/jpeg"],
+    ["a.jpeg", "image/jpeg"],
+    ["a.gif", "image/gif"],
+    ["a.webp", "image/webp"],
+    ["a.svg", "image/svg+xml"],
+    ["a.unknown", "application/octet-stream"],
+  ];
+  for (const [name, expected] of cases) {
+    check(`${name} → ${expected}`, utils.mimeForPath(name) === expected, utils.mimeForPath(name));
+  }
+}
+
 rmSync(outDir, { recursive: true, force: true });
 
 console.log("");
