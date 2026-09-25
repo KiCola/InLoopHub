@@ -59,6 +59,9 @@ EXIT_VALIDATION_FAILED = 1
 #: 每次穿透 ctx.obj 会让签名变吵，而这是一个"进程级"设置。
 _content_override: Path | None = None
 _json_mode: bool = False
+#: stdout 上是否已经写过一份 JSON。用于避免兜底路径与 `_fail` 各发一份，
+#: 两份 JSON 会让调用方 `json.loads` 直接失败（这个 bug 真出现过）。
+_json_emitted: bool = False
 
 
 def _config_or_fail() -> Config:
@@ -142,6 +145,7 @@ def _fail(message: str, *, code: str = "command_failed", hint: str = "") -> None
         from inloop import jsonapi
 
         jsonapi.emit_error(code, message, hint=hint)
+        globals()["_json_emitted"] = True
     err_console.print(f"[bold red]✗[/bold red] {escape(message)}")
     raise typer.Exit(code=EXIT_VALIDATION_FAILED)
 
@@ -212,18 +216,41 @@ def info() -> None:
     try:
         config = load_config()
     except ConfigError as exc:
-        _fail(str(exc))
+        _fail(str(exc), code=exc.code)
+        return
+
+    # 内容目录是**最容易搞错**的一项：它有四个来源，配错了会让命令读到另一个目录。
+    # 因此不仅给出解析结果，还给出它来自哪里。
+    content_root = _content_root_or_fail(config)
+    templates = available_templates(config.root)
+    locations = find_articles(content_root)
+    source = _content_root_source(config)
+
+    if _json_output():
+        from inloop import jsonapi
+
+        jsonapi.emit(
+            jsonapi.info_payload(
+                repo_root=config.root,
+                content_root=content_root,
+                content_source=source,
+                dist_root=config.resolve_dist_root(),
+                site_name=str(config.site_value("name")),
+                site_author=str(config.site_value("author")),
+                brand_primary=str(config.brand_value("primary")),
+                article_count=len(locations),
+                next_id=next_article_id(content_root),
+                templates=list(templates),
+            )
+        )
         return
 
     console.print("[bold]工具仓库根[/bold]")
     console.print(f"  {config.root}")
 
-    # 内容目录是**最容易搞错**的一项：它有四个来源，配错了会让命令读到另一个目录。
-    # 因此不仅打印解析结果，还打印它来自哪里。
-    content_root = _content_root_or_fail(config)
     console.print("[bold]内容目录[/bold]")
     console.print(f"  {content_root}")
-    console.print(f"  [dim]来源：{_content_root_source(config)}[/dim]")
+    console.print(f"  [dim]来源：{source}[/dim]")
 
     console.print("[bold]构建产物目录[/bold]")
     console.print(f"  {config.resolve_dist_root()}")
@@ -238,11 +265,9 @@ def info() -> None:
     console.print(f"  行高：{config.wechat_value('line_height')}")
     console.print(f"  标题样式：{config.wechat_value('heading_style')}")
 
-    locations = find_articles(content_root)
     console.print("[bold]文章[/bold]")
     console.print(f"  已有 {len(locations)} 篇，下一个编号 {next_article_id(content_root):03d}")
     console.print("[bold]模板[/bold]")
-    templates = available_templates(config.root)
     console.print(f"  {', '.join(templates) if templates else '（无）'}")
 
 
@@ -341,7 +366,29 @@ def new(
     try:
         result = create_article(content_root, root, request)
     except (ArticleCreationError, TemplateError) as exc:
-        _fail(str(exc))
+        _fail(str(exc), code="article_create_failed")
+        return
+
+    if _json_output():
+        from inloop import jsonapi
+
+        # **必须返回新文章的路径**：调用方要立刻打开它。
+        # 没有这个输出时，插件只能"create 之后再 list 一次猜哪篇是新的"——
+        # 多跑一次 Python 进程，并发时还可能认错文章。
+        jsonapi.emit(
+            jsonapi.new_article_payload(
+                content_root=content_root,
+                dir_name=result.location.dir_name,
+                slug=result.article.slug,
+                title=result.article.title,
+                article_id=result.article.id,
+                status=result.article.status.value,
+                path=jsonapi.rel_to(result.location.index, content_root),
+                cover=result.article.cover,
+            )
+        )
+        for issue in result.article.issues:
+            err_console.print(f"[yellow]提示：{escape(issue.render())}[/yellow]")
         return
 
     console.print(
@@ -825,11 +872,29 @@ def themes() -> None:
 
     config = _config_or_fail()
     entries = describe_themes(config)
+    current = theme_name(config)
+
+    if _json_output():
+        from inloop import jsonapi
+
+        jsonapi.emit(
+            jsonapi.themes_payload(
+                [
+                    {
+                        "name": name,
+                        "purpose": purpose or "",
+                        "current": "true" if name == current else "false",
+                    }
+                    for name, purpose in entries
+                ]
+            )
+        )
+        return
+
     if not entries:
         console.print("styles/themes/ 下没有主题文件。")
         return
 
-    current = theme_name(config)
     console.print("[bold]可用主题[/bold]")
     for name, purpose in entries:
         mark = " [green]（当前）[/green]" if name == current else ""
@@ -1358,10 +1423,20 @@ def status(
         return
 
     original = location.index.read_text(encoding="utf-8")
+    # 记下改之前的状态，让调用方能回报"从哪个状态改到哪个状态"
+    previous_status = ""
+    try:
+        previous_status = Article.from_text(
+            original, source=location.index
+        ).status.value
+    except (ValueError, AttributeError):
+        previous_status = ""
+
     updated, changed = _replace_status_line(original, want.value)
     if not changed:
         _fail(
-            f"在 {_relative(location.index, root)} 中未找到 `status:` 行，无法修改。\n"
+            f"在 {_relative(location.index, config.root)} 中未找到 `status:` 行，"
+            f"无法修改。\n"
             "修正方法：确认 front matter 中含 status 字段。"
         )
         return
@@ -1371,10 +1446,27 @@ def status(
         for issue in article.errors:
             err_console.print(f"[red]{escape(issue.render(location.index))}[/red]")
         _fail("修改后文章存在 ERROR，已放弃写入，源文件未变。")
+        return
 
     location.index.write_text(updated, encoding="utf-8", newline="\n")
+
+    if _json_output():
+        from inloop import jsonapi
+
+        jsonapi.emit(
+            jsonapi.status_payload(
+                dir_name=location.dir_name,
+                slug=article.slug,
+                title=article.title,
+                status=want.value,
+                previous_status=previous_status,
+                path=jsonapi.rel_to(location.index, content_root),
+            )
+        )
+        return
+
     console.print(
-        f"[bold green]✓[/bold green] {_relative(location.index, root)} "
+        f"[bold green]✓[/bold green] {_relative(location.index, config.root)} "
         f"status → {want.value}"
     )
 
@@ -1441,7 +1533,13 @@ def _run() -> None:
     _force_utf8_output()
     try:
         app()
-    except (typer.Exit, SystemExit):
+    except (typer.Exit, SystemExit) as exc:
+        # Typer/Click 对**用法错误**（缺参数、参数非法）会在解析阶段自行退出，
+        # 此时主回调根本没跑过，`_json_mode` 还是初始值。
+        # 若放任它退出，`--json` 调用方拿到的是**空 stdout + 退出码 2**，
+        # 只能靠猜。因此这里补发一份 JSON——命令行上带了 --json 就一定要给。
+        if _json_output() and not _stdout_has_json():
+            _emit_usage_error(exc)
         raise
     except KeyboardInterrupt:  # pragma: no cover - 人工中断
         _fail("操作被中断。", code="interrupted")
@@ -1474,6 +1572,46 @@ def _run() -> None:
                 "请把上面完整的 traceback 连同执行的命令一起反馈。"
             ),
         )
+
+
+def _stdout_has_json() -> bool:
+    """stdout 上是否已经写过 JSON（避免重复输出两份）。
+
+    这里不看流本身，只看"模式"——`_fail` 是唯一的错误出口，
+    如果它已经发过，调用方已经拿到东西了。
+    """
+    return _json_emitted
+
+
+def _emit_usage_error(exc: BaseException) -> None:
+    """把 Typer/Click 的用法错误也转成 JSON。
+
+    用法错误（缺参数、参数类型不对）由框架在解析阶段处理，
+    消息在 stdout/stderr 上已经由框架打印过了。这里额外补一份结构化输出，
+    让 `--json` 调用方能按同一套字段判断，而不必去解析人话。
+    """
+    from inloop import jsonapi
+
+    message = "命令行参数不正确。"
+    # Click 的 UsageError 带 format_message()，比 str() 完整
+    format_message = getattr(exc, "format_message", None)
+    if callable(format_message):
+        try:
+            message = str(format_message()).strip() or message
+        except Exception:  # noqa: BLE001 - 取不到就用默认文案
+            pass
+    elif str(exc).strip():
+        message = str(exc).strip()
+
+    if isinstance(exc, SystemExit) and exc.code in (0, None):
+        # 正常退出（例如 --help）不该报成错误
+        return
+
+    jsonapi.emit_error(
+        "usage_error",
+        message,
+        hint="用 `inloop --help` 查看命令与参数的完整说明。",
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - 手动调试用

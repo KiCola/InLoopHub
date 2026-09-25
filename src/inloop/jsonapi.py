@@ -111,6 +111,11 @@ def _rel(path: Path | None, base: Path) -> str:
         return ""
 
 
+def rel_to(path: Path | None, base: Path) -> str:
+    """公开版 :func:`_rel`，供其他模块复用同一套相对路径写法。"""
+    return _rel(path, base)
+
+
 def article_to_dict(article: Article, location: ArticleLocation, *, base: Path) -> dict[str, Any]:
     """把一篇文章转成 JSON 对象。
 
@@ -368,3 +373,115 @@ def _is_year_name(name: str) -> bool:
         return False
     year = int(name)
     return 1900 <= year <= 2999
+
+
+# --- 写操作与信息查询的结果 -----------------------------------------------
+
+
+def new_article_payload(
+    *,
+    content_root: Path,
+    dir_name: str,
+    slug: str,
+    title: str,
+    article_id: int,
+    status: str,
+    path: str,
+    cover: str,
+) -> dict[str, Any]:
+    """新建文章的结果。
+
+    **必须返回新文章的路径**：调用方（插件）要立刻打开它。
+    原先这个命令没有 JSON 输出，插件只能"create 之后再 list 一次去猜哪篇是新的"——
+    多跑一次 Python 进程，而且并发时可能认错文章。
+
+    ``content_root`` 与 :func:`list_payload` 一致地给出：
+    调用方要靠它把相对 ``path`` 拼成可打开的位置
+    （插件还要再把它转成 vault 内路径）。
+    """
+    return {
+        "ok": True,
+        "schema": SCHEMA_VERSION,
+        "content_root": content_root.as_posix(),
+        "dir_name": dir_name,
+        "slug": slug,
+        "title": title,
+        "id": article_id,
+        "status": status,
+        # 相对内容目录，调用方自行拼接（与 articles[].path 同一约定）
+        "path": path,
+        "cover": cover,
+    }
+
+
+def status_payload(
+    *,
+    dir_name: str,
+    slug: str,
+    title: str,
+    status: str,
+    previous_status: str,
+    path: str,
+) -> dict[str, Any]:
+    """修改状态的结果。
+
+    ``previous_status`` 让调用方能在界面上回滚或提示"从 X 改到 Y"。
+    """
+    return {
+        "ok": True,
+        "schema": SCHEMA_VERSION,
+        "dir_name": dir_name,
+        "slug": slug,
+        "title": title,
+        "status": status,
+        "previous_status": previous_status,
+        "path": path,
+    }
+
+
+def info_payload(
+    *,
+    repo_root: Path,
+    content_root: Path,
+    content_source: str,
+    dist_root: Path,
+    site_name: str,
+    site_author: str,
+    brand_primary: str,
+    article_count: int,
+    next_id: int,
+    templates: list[str],
+) -> dict[str, Any]:
+    """当前生效的配置概要。
+
+    ``content_source`` 是**诊断的关键**：内容目录有四级来源，
+    "以为在读 A、实际在读 B"是这套设计里最容易犯的错，
+    因此把来源和值一起给出。
+    """
+    return {
+        "ok": True,
+        "schema": SCHEMA_VERSION,
+        "repo_root": repo_root.as_posix(),
+        "content_root": content_root.as_posix(),
+        "content_source": content_source,
+        "dist_root": dist_root.as_posix(),
+        "site": {"name": site_name, "author": site_author},
+        "brand": {"primary": brand_primary},
+        "article_count": article_count,
+        "next_id": next_id,
+        "templates": templates,
+    }
+
+
+def themes_payload(themes: list[dict[str, str]]) -> dict[str, Any]:
+    """可用排版主题。
+
+    每项含 ``name`` / ``label`` / ``description`` / ``file``，
+    供界面直接渲染成选择列表。
+    """
+    return {
+        "ok": True,
+        "schema": SCHEMA_VERSION,
+        "count": len(themes),
+        "themes": themes,
+    }

@@ -342,8 +342,37 @@ export type ArticleStatus = (typeof STATUSES)[number];
  * 这是 Python 侧**唯一**允许改写已存在文章文件的场景，且只改 status 一行。
  * 因此从插件调用它是安全的——不会因为手滑把正文改掉。
  */
-export function setStatus(options: CliOptions, slug: string, status: string): Promise<Envelope> {
-  return runCli<Envelope>(options, ["status", slug, status], true);
+export function setStatus(
+  options: CliOptions,
+  slug: string,
+  status: string,
+): Promise<StatusResult> {
+  return runCli<StatusResult>(options, ["status", slug, status], true);
+}
+
+/** `status` 命令的结果 */
+export interface StatusResult extends Envelope {
+  dir_name: string;
+  slug: string;
+  title: string;
+  status: string;
+  /** 改之前的状态，便于界面提示"从 X 到 Y"或回滚 */
+  previous_status: string;
+  path: string;
+}
+
+/** `new` 命令的结果 */
+export interface NewArticleResult extends Envelope {
+  /** 内容目录的绝对路径（POSIX 风格），用来把相对 path 拼成可打开的位置 */
+  content_root: string;
+  dir_name: string;
+  slug: string;
+  title: string;
+  id: number;
+  status: string;
+  /** 相对内容目录的正文路径 */
+  path: string;
+  cover: string;
 }
 
 /** 新建文章的输入 */
@@ -356,9 +385,19 @@ export interface NewArticleInput {
   summary: string;
 }
 
-export function createArticle(options: CliOptions, input: NewArticleInput): Promise<Envelope> {
+/**
+ * 新建文章，返回**新文章的信息**（含路径）。
+ *
+ * 为什么必须拿到返回值：插件建完要立刻打开那篇文章。
+ * 早先 `new` 没有 JSON 输出，插件只能"建完再 list 一次、按 slug 猜哪篇是新的"——
+ * 多跑一次 Python 进程，而且并发时可能认错文章。
+ */
+export function createArticle(
+  options: CliOptions,
+  input: NewArticleInput,
+): Promise<NewArticleResult> {
   // 注意 --yes：插件已经用表单收集过必填项，不需要 Python 侧再交互提问
-  return runCli<Envelope>(
+  return runCli<NewArticleResult>(
     options,
     [
       "new",

@@ -216,7 +216,16 @@ export default class InloopPlugin extends Plugin {
     void this.activatePreview();
   }
 
-  /** 供视图调用：真正执行新建 */
+  /**
+   * 供视图调用：真正执行新建。
+   *
+   * 返回 `content_root` 与相对路径——视图要先把绝对路径转成 **vault 内路径**
+   * 才能用 `vault.getAbstractFileByPath()` 打开文件。
+   *
+   * **不再多跑一次 `list` 去猜哪篇是新的**：那既慢（多一次 Python 启动，约 300ms）
+   * 又可能认错（并发或同名 slug 时）。这条路径原先就是坏的：`new` 当时没有
+   * JSON 输出，解析失败会让插件把"创建成功"报成"创建失败"。
+   */
   async createArticleFromForm(input: {
     title: string;
     slug: string;
@@ -224,16 +233,15 @@ export default class InloopPlugin extends Plugin {
     template: string;
     tags: string;
     summary: string;
-  }): Promise<string> {
-    await createArticle(this.cliOptions(), input);
-    // 从 JSON 拿不到路径也没关系：按约定拼出来即可（结构是固定的）
-    const year = new Date().getFullYear();
-    const list = await listArticles(this.cliOptions());
-    const created = list.articles.find((a) => a.slug === input.slug);
-    if (created) {
-      return created.path;
+  }): Promise<{ contentRoot: string; path: string }> {
+    const created = await createArticle(this.cliOptions(), input);
+    if (!created.path) {
+      throw new Error(
+        "创建成功但没有拿到文章路径（inloop 的输出缺少 path 字段）。" +
+          "这通常说明插件与 inloop 版本不匹配，请更新到同一版本。",
+      );
     }
-    return `${year}/${input.slug}/index.md`;
+    return { contentRoot: created.content_root ?? "", path: created.path };
   }
 
   // --- 构建并复制 ---------------------------------------------------------

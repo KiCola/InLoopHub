@@ -435,12 +435,12 @@ export class InloopPreviewView extends ItemView {
         }
         submit.disabled = true;
         try {
-          const path = await this.plugin.createArticleFromForm(payload);
+          const created = await this.plugin.createArticleFromForm(payload);
           form.hide();
           form.empty();
-          new Notice(`✓ 已创建 ${path}`);
+          new Notice(`✓ 已创建 ${created.path}`);
           await this.render();
-          await this.openByRelativePath(path);
+          await this.openCreated(created.contentRoot, created.path);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           new Notice(`创建失败：${message}`, 10000);
@@ -459,14 +459,38 @@ export class InloopPreviewView extends ItemView {
     return input;
   }
 
-  /** 创建后立刻打开，省掉"去文件树里找"这一步 */
-  private async openByRelativePath(relativePath: string): Promise<void> {
-    const file = this.app.vault.getAbstractFileByPath(relativePath);
+  /**
+   * 创建后立刻打开，省掉"去文件树里找"这一步。
+   *
+   * CLI 给的是**相对内容目录**的路径，而 Obsidian 的 `getAbstractFileByPath`
+   * 要的是**vault 内**相对路径——两者只有在内容目录恰好是 vault 根时才相同。
+   * 因此先拼成绝对路径，再转成 vault 路径；不在 vault 内时给出可手动打开的完整路径。
+   */
+  private async openCreated(contentRoot: string, relativePath: string): Promise<void> {
+    const base = (contentRoot || "").replace(/\\/g, "/").replace(/\/+$/, "");
+    const absolute = base ? `${base}/${relativePath}` : relativePath;
+    const vaultPath = toVaultPath(this.app, absolute);
+
+    if (!vaultPath) {
+      // 文章建在 vault 之外（完全合法：内容目录可以任意指定），
+      // 这时没法在 Obsidian 里打开，只能告诉用户文件在哪。
+      new Notice(`已创建，但不在当前 vault 内，请手动打开：\n${absolute}`, 12000);
+      return;
+    }
+
+    const file = this.app.vault.getAbstractFileByPath(vaultPath);
     if (file) {
       await this.app.workspace.getLeaf().openFile(file as never);
       return;
     }
-    new Notice(`已创建，但没能在 vault 里定位到：${relativePath}`);
+    // vault 缓存可能还没索引到新文件，等一下再试一次
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+    const retry = this.app.vault.getAbstractFileByPath(vaultPath);
+    if (retry) {
+      await this.app.workspace.getLeaf().openFile(retry as never);
+      return;
+    }
+    new Notice(`已创建，但没能在 vault 里定位到：${vaultPath}`, 10000);
   }
 
   // --- 删除 ---------------------------------------------------------------

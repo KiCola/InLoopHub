@@ -93,6 +93,40 @@ def invoke_json(content_dir: Path, *args: str):
         return result, None
 
 
+def invoke_real(content_root: Path, *args: str) -> tuple[int, object | None, str, str]:
+    """用**真实进程**调用 CLI，返回 ``(退出码, JSON, stdout, stderr)``。
+
+    为什么需要它：`CliRunner` 直接调用 Typer 应用，**绕过 `_run()` 入口**——
+    兜底异常处理、UTF-8 强制、用法错误的 JSON 补发都在那里。
+    而插件用的是真实进程，因此涉及这些行为的测试必须走同一条路径，
+    否则测的不是插件实际会遇到的东西。
+    """
+    executable = REPO_ROOT / ".venv" / "Scripts" / "inloop.exe"
+    if not executable.is_file():
+        pytest.skip("找不到虚拟环境里的 inloop（本测试需要真实进程）")
+
+    env = {
+        k: v for k, v in os.environ.items() if k not in {"PYTHONIOENCODING", "PYTHONUTF8"}
+    }
+    env["INLOOP_ROOT"] = str(REPO_ROOT)
+
+    completed = subprocess.run(
+        # 全局选项必须放在子命令**之前**
+        [str(executable), "--json", "--content", str(content_root), *args],
+        capture_output=True,
+        env=env,
+        timeout=120,
+        cwd=REPO_ROOT,
+    )
+    stdout = completed.stdout.decode("utf-8", errors="replace")
+    stderr = completed.stderr.decode("utf-8", errors="replace")
+    try:
+        payload: object | None = json.loads(stdout)
+    except json.JSONDecodeError:
+        payload = None
+    return completed.returncode, payload, stdout, stderr
+
+
 # --- 输出契约 -------------------------------------------------------------
 
 
@@ -420,3 +454,161 @@ def test_JSON_模式同样走配置层(mini_repo: Path, tmp_path: Path) -> None:
         f"配置文件里的内容目录没有生效：得到 {data.get('content_root')}"
     )
     assert [a["dir_name"] for a in data["articles"]] == ["001-configured"]
+
+
+# --- 覆盖面：每个命令都必须有 JSON 输出 -----------------------------------
+
+
+def test_每个命令都实现_json_输出(tmp_path: Path) -> None:
+    """**这是防止同类 bug 再犯的关键测试。**
+
+    背景：`--json` 是给插件用的接口。但曾经出现过"插件加了 `--json` 参数、
+    而某个命令根本没实现 JSON 输出"的情况——那个命令照旧打印人类可读文本，
+    调用方 `json.loads` 失败，于是**把"创建成功"报成"创建失败"**，
+    用户看到的报错甚至自带成功信息（自相矛盾）。
+
+    根因是"给插件加参数"和"给命令加输出"是两处独立改动，容易漏。
+    因此这里遍历所有命令，逐个**用真实进程**调用并断言 stdout 是合法 JSON。
+
+    为什么不用 CliRunner：它直接调用 Typer 应用，**绕过 `_run()` 入口**
+    （兜底异常处理、UTF-8 强制都在那里）。插件用的是真实进程，
+    测试就该用同一条路径，否则测的是另一个东西。
+    """
+    import typer.main
+
+    group = typer.main.get_command(app)
+    names = sorted(group.commands.keys())  # type: ignore[attr-defined]
+    assert names, "没有取到任何命令，测试自身有问题"
+
+    content_root = tmp_path / "coverage-content"
+    content_root.mkdir()
+
+    # 这些命令**不需要**文章参数，可以无参调用。
+    # 注意 `check` 不带参数走的是本工具自己的校验（会给出"缺少要检查的文章"），
+    # 因此这里用 `check --all`。
+    no_args = {
+        "list": [],
+        "check": ["--all"],
+        "info": [],
+        "themes": [],
+        "publish-status": [],
+        "rules": [],
+        "root": [],
+        "version": [],
+    }
+
+    checked = 0
+    for name in no_args:
+        assert name in names, f"命令 `{name}` 已不存在，请同步本测试"
+        code, payload, stdout, stderr = invoke_real(content_root, *no_args[name])
+        assert stdout.strip(), f"`{name} --json` 没有任何输出（stderr: {stderr[:120]}）"
+        try:
+            data = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            pytest.fail(
+                f"`{name} --json` 的输出不是合法 JSON：{exc}\n"
+                f"实际内容：{stdout[:200]!r}\n"
+                f"这说明该命令没实现 --json 输出，调用方会把成功当成失败。"
+            )
+        assert isinstance(data, dict), f"`{name} --json` 输出的不是对象"
+        assert "ok" in data, f"`{name} --json` 的输出缺少 ok 字段"
+        checked += 1
+
+    assert checked >= 6, f"只覆盖了 {checked} 个命令，太少"
+
+
+def test_用法错误也给_JSON() -> None:
+    """Typer/Click 的用法错误不能让 `--json` 调用方拿到空 stdout。
+
+    这类错误在**参数解析阶段**就退出，主回调根本没跑过，`_json_mode` 还是初值。
+    若不放行处理，调用方看到的是"退出码 2 + 空输出"，只能靠猜。
+
+    因此 `_run()` 在放行 SystemExit 之前补发一份 JSON。
+    这条必须走真实进程——CliRunner 绕过 `_run()`，测不到这个兜底。
+    """
+    executable = REPO_ROOT / ".venv" / "Scripts" / "inloop.exe"
+    if not executable.is_file():
+        pytest.skip("找不到虚拟环境里的 inloop（本测试需要真实进程）")
+
+    completed = subprocess.run(
+        [str(executable), "--json", "delete"],  # delete 缺 target
+        capture_output=True,
+        env={**os.environ, "INLOOP_ROOT": str(REPO_ROOT)},
+        timeout=60,
+        cwd=REPO_ROOT,
+    )
+    stdout = completed.stdout.decode("utf-8", errors="replace")
+
+    assert completed.returncode != 0
+    assert stdout.strip(), "用法错误时 stdout 是空的，调用方无从判断"
+    payload = json.loads(stdout)
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "usage_error"
+    assert "help" in payload["error"]["hint"] or "帮助" in payload["error"]["hint"]
+
+
+def test_new_命令的_json_包含路径(content_dir: Path) -> None:
+    """新建必须返回**新文章的路径**——调用方建完就要打开它。
+
+    没有这个字段时，插件只能"create 之后再 list 一次、按 slug 猜哪篇是新的"，
+    既慢（多一次 Python 启动）又可能在并发时认错。
+    """
+    result = runner.invoke(
+        app,
+        [
+            "--content",
+            str(content_dir),
+            "--json",
+            "new",
+            "--title",
+            "新建路径测试",
+            "--slug",
+            "new-path-test",
+            "--category",
+            "research",
+            "--template",
+            "research-note",
+            "--tags",
+            "测试",
+            "--summary",
+            "摘要",
+            "--yes",
+        ],
+    )
+    data = json.loads(result.stdout)
+    assert data["ok"] is True, result.stdout[:300]
+    assert data["path"] == "2026/002-new-path-test/index.md", data["path"]
+    assert data["dir_name"] == "002-new-path-test"
+    assert data["slug"] == "new-path-test"
+    # content_root 让调用方能把相对 path 拼成可打开的位置
+    assert data["content_root"] == content_dir.resolve().as_posix()
+    assert data["cover"] == "cover.png"
+
+
+def test_status_命令可用且回报前后状态(content_dir: Path) -> None:
+    """`status` 曾经是**完全坏的**：里面引用了未定义的 `root` 变量。
+
+    它从没被真正执行过，所以一直没暴露。插件里的状态下拉正好会踩到。
+    """
+    result = runner.invoke(
+        app, ["--content", str(content_dir), "--json", "status", "001-json-test", "review"]
+    )
+    data = json.loads(result.stdout)
+    assert data["ok"] is True, result.stdout[:300]
+    assert data["status"] == "review"
+    assert data["previous_status"] == "draft"
+    assert data["dir_name"] == "001-json-test"
+
+    # 确认真的写进文件了
+    text = (content_dir / "2026" / "001-json-test" / "index.md").read_text(encoding="utf-8")
+    assert "status: review" in text
+
+
+def test_info_命令的_json_给出内容目录与来源() -> None:
+    """`content_source` 是诊断的关键：四级来源里到底用上了哪一级。"""
+    result = runner.invoke(app, ["--json", "info"])
+    data = json.loads(result.stdout)
+    assert data["ok"] is True
+    assert Path(data["content_root"]).is_absolute()
+    assert data["content_source"]
+    assert "article_count" in data and "next_id" in data
