@@ -9,22 +9,25 @@
 | # | 内容 | 状态 |
 |---|---|---|
 | 1 | 仓库初始化 | 完成 |
-| 2 | Markdown 规范 | 部分：front matter 规范按任务书 §4 落实为可校验规则；正文格式约定待渲染环节落地 |
+| 2 | Markdown 规范 | 完成：front matter 与正文格式均有校验与渲染实现 |
 | 3 | Front Matter Parser | 完成 |
 | 4 | Article Model | 完成（含序列化、规则码集中表） |
 | 5 | `inloop new` | 完成（模板系统一并落地） |
 | 6 | `inloop check` | 完成 |
-| 7 | Markdown → HTML | 待办 |
-| 8 | 微信 inline CSS | 待办 |
-| 9 | 图片处理 | 待办 |
-| 10 | preview HTML | 待办 |
+| 7 | Markdown → HTML | 完成（含脚注、公式、任务列表的微信端降级） |
+| 8 | 微信 inline CSS | 完成（样式来自 styles/*.css，产物零 class） |
+| 9 | 图片处理 | 完成（格式/体积/绝对路径校验，结构化图片清单） |
+| 10 | preview HTML | 完成（含 `inloop preview-wechat` 本地服务） |
 
-已超出 P0 清单但顺手完成的小项：`inloop status`（任务书 §17）、`inloop rules`（规则码自查）。
+**P0 已全部完成。** 超出 P0 清单但顺手完成的小项：`inloop status`（任务书 §17）、
+`inloop rules`（规则码自查）、`inloop index`（任务书 §14）、pytest 测试套件。
 
 ## 第二阶段（P1）—— 让系统变得完整
 
 任务书 §25 的 P1：README 索引、`metadata.json`、模板系统、Rich CLI、
 GitHub Actions、pytest。
+
+其中 README 索引、`metadata.json`、模板系统、pytest 已完成；**剩余 GitHub Actions**。
 
 ## 第三阶段（P2）—— 自动化
 

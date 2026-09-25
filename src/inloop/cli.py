@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
@@ -26,7 +27,7 @@ from inloop.articles import (
     find_articles,
     next_article_id,
 )
-from inloop.config import ConfigError, load_config, repo_root
+from inloop.config import Config, ConfigError, load_config, repo_root
 from inloop.models.article import Article, ArticleError, Category, Status
 from inloop.rules import IssueLevel
 from inloop.templates import TemplateError, available_templates, load_template
@@ -55,6 +56,10 @@ def _resolve_article(root: Path, target: str) -> ArticleLocation:
     """把命令行给出的目标解析为文章位置。
 
     接受三种写法：文章目录、``index.md`` 路径、或 slug（含带序号的目录名）。
+
+    返回的路径**一律是绝对路径**：相对路径会在后续环节（例如计算仓库相对路径、
+    与配置里的绝对根目录比较）引发难以理解的错误。命令行给的相对路径是相对
+    当前工作目录的，这里统一解析掉。
     """
     candidate = Path(target)
 
@@ -86,11 +91,12 @@ def _resolve_article(root: Path, target: str) -> ArticleLocation:
 def _location_from_index(index: Path, root: Path) -> ArticleLocation:
     from inloop.models.article import ARTICLE_DIR_PATTERN
 
-    directory = index.parent
+    resolved_index = index.resolve()
+    directory = resolved_index.parent
     match = ARTICLE_DIR_PATTERN.match(directory.name)
     return ArticleLocation(
         directory=directory,
-        index=index,
+        index=resolved_index,
         dir_name=directory.name,
         number=int(match.group("number")) if match else None,
         slug=match.group("slug") if match else None,
@@ -471,6 +477,169 @@ def rules() -> None:
     for rule in ALL_RULES:
         style = "red" if rule.level is IssueLevel.ERROR else "yellow"
         console.print(f"  {rule.code}  [{style}]{rule.level.value:7s}[/{style}] {rule.summary}")
+
+
+# --- build-wechat / preview-wechat ---------------------------------------
+
+
+@app.command("build-wechat")
+def build_wechat(
+    target: str = typer.Argument(..., help="文章目录、index.md 路径或 slug"),
+) -> None:
+    """构建微信公众号产物（任务书 §8）。"""
+    config = _config_or_fail()
+    location, article = _load_article_or_fail(config.root, target)
+
+    from inloop.build import BuildError, build_article
+
+    try:
+        outcome = build_article(article, config=config)
+    except BuildError as exc:
+        err_console.print(f"[bold red]✗[/bold red] {escape(str(exc))}")
+        raise typer.Exit(code=EXIT_VALIDATION_FAILED) from exc
+
+    console.print(
+        f"[bold green]✓[/bold green] 构建完成 "
+        f"{_relative(outcome.output_dir, config.root)}"
+    )
+    for relative in outcome.files:
+        full = outcome.output_dir / relative
+        size = full.stat().st_size if full.exists() else 0
+        console.print(f"  {relative.as_posix():28s} {_human_size(size)}")
+
+    _print_warnings(outcome.warnings)
+
+
+@app.command("preview-wechat")
+def preview_wechat(
+    target: str = typer.Argument(..., help="文章目录、index.md 路径或 slug"),
+    port: int = typer.Option(None, "--port", "-p", help="端口，默认 8000 起自动顺延"),
+    no_open: bool = typer.Option(False, "--no-open", help="不自动打开浏览器"),
+) -> None:
+    """构建并启动本地预览服务（任务书 §13）。"""
+    config = _config_or_fail()
+    location, article = _load_article_or_fail(config.root, target)
+
+    from inloop.build import BuildError, build_article
+    from inloop.preview import DEFAULT_PORT, PreviewError, find_free_port, serve
+
+    try:
+        outcome = build_article(article, config=config)
+    except BuildError as exc:
+        err_console.print(f"[bold red]✗[/bold red] {escape(str(exc))}")
+        raise typer.Exit(code=EXIT_VALIDATION_FAILED) from exc
+
+    console.print(
+        f"[bold green]✓[/bold green] 构建完成 {_relative(outcome.output_dir, config.root)}"
+    )
+    _print_warnings(outcome.warnings)
+
+    try:
+        resolved_port = port if port is not None else find_free_port(DEFAULT_PORT)
+        serve(
+            outcome.output_dir,
+            port=resolved_port,
+            open_browser=not no_open,
+            path=f"/{ARTICLE_PREVIEW_NAME}",
+        )
+    except PreviewError as exc:
+        err_console.print(f"[bold red]✗[/bold red] {escape(str(exc))}")
+        raise typer.Exit(code=EXIT_VALIDATION_FAILED) from exc
+
+
+# --- index ---------------------------------------------------------------
+
+
+@app.command()
+def index(
+    check: bool = typer.Option(False, "--check", help="只检查 README 索引是否为最新，不写入"),
+) -> None:
+    """生成 README 中的文章索引（任务书 §14）。"""
+    from inloop.index import IndexError_, collect_entries, render_index, update_readme
+
+    config = _config_or_fail()
+    root = config.root
+
+    try:
+        entries = collect_entries(root)
+    except IndexError_ as exc:
+        _fail(str(exc))
+        return
+
+    if check:
+        block = render_index(entries)
+        readme_path = root / "README.md"
+        readme = readme_path.read_text(encoding="utf-8") if readme_path.is_file() else ""
+        if block in readme:
+            console.print(f"[bold green]✓[/bold green] README 索引已是最新（{len(entries)} 篇）")
+            return
+        err_console.print("[bold red]✗[/bold red] README 索引与文章不一致。")
+        console.print("修正方法：运行 `inloop index` 更新索引。")
+        raise typer.Exit(code=EXIT_VALIDATION_FAILED)
+
+    try:
+        changed, count = update_readme(root, entries)
+    except IndexError_ as exc:
+        _fail(str(exc))
+        return
+
+    if changed:
+        console.print(f"[bold green]✓[/bold green] README 索引已更新（{count} 篇）")
+    else:
+        console.print(f"[bold green]✓[/bold green] README 索引无变化（{count} 篇）")
+
+
+# --- 共用辅助 -------------------------------------------------------------
+
+
+#: 预览页在产物目录中的文件名，供预览服务指定初始路径
+ARTICLE_PREVIEW_NAME = "article.preview.html"
+
+
+def _config_or_fail() -> Config:
+    """加载配置，失败时以统一格式退出。"""
+    try:
+        return load_config()
+    except ConfigError as exc:
+        _fail(str(exc))
+        raise AssertionError("unreachable") from exc  # pragma: no cover
+
+
+def _load_article_or_fail(root: Path, target: str) -> tuple[ArticleLocation, Article]:
+    """定位并解析文章，失败时以统一格式退出。"""
+    try:
+        location = _resolve_article(root, target)
+    except ArticleCreationError as exc:
+        _fail(str(exc))
+        raise AssertionError("unreachable") from exc  # pragma: no cover
+
+    try:
+        article = Article.from_text(
+            location.index.read_text(encoding="utf-8"), source=location.index
+        )
+    except ArticleError as exc:
+        err_console.print(f"[bold red]✗[/bold red] {escape(str(exc))}")
+        raise typer.Exit(code=EXIT_VALIDATION_FAILED) from exc
+    return location, article
+
+
+def _print_warnings(warnings: Sequence[str]) -> None:
+    """统一展示构建过程中的非致命问题。"""
+    if not warnings:
+        return
+    console.print(f"[bold yellow]提示（{len(warnings)}）[/bold yellow]")
+    for warning in warnings:
+        console.print(f"  [yellow]{escape(warning)}[/yellow]")
+
+
+def _human_size(size: int) -> str:
+    """字节数转人读形式。"""
+    value = float(size)
+    for unit in ("B", "KB", "MB"):
+        if value < 1024 or unit == "MB":
+            return f"{int(value)}{unit}" if unit == "B" else f"{value:.1f}{unit}"
+        value /= 1024
+    return f"{value:.1f}MB"
 
 
 # --- 状态 ----------------------------------------------------------------

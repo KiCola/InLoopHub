@@ -24,6 +24,9 @@ from inloop.config import Config
 #: 正文容器标签（粘贴范围）
 ARTICLE_TAG = "div"
 
+#: 正文容器在样式表中的选择器。产物中容器不带 class，该规则只用于取容器自身样式。
+CONTAINER_SELECTOR = ".inloop-article"
+
 #: 图片说明使用的标记 class 名。产物中会被去掉，仅用于生成阶段查询样式。
 CAPTION_MARKER = "inloop-caption"
 
@@ -42,13 +45,21 @@ class StyleSheet:
     """已解析的样式表：选择器 → 声明。
 
     Attributes:
-        rules: ``(selector, declarations)`` 列表，保持文件中的顺序，
-            以便后出现的规则可以覆盖先出现的。
+        rules: ``(normalized_selector, declarations)`` 列表，保持文件中的顺序，
+            以便后出现的规则可以覆盖先出现的。规范化后的选择器用于**元素匹配**。
+        raw_rules: ``(原始选择器, declarations)`` 列表。容器规则（``.inloop-article``）
+            在规范化后会变成空字符串，无法再用于匹配，因此必须保留原始写法。
         variables: ``:root`` 中定义的 CSS 变量。
     """
 
-    def __init__(self, rules: list[tuple[str, dict[str, str]]], variables: dict[str, str]) -> None:
+    def __init__(
+        self,
+        rules: list[tuple[str, dict[str, str]]],
+        variables: dict[str, str],
+        raw_rules: list[tuple[str, dict[str, str]]] | None = None,
+    ) -> None:
         self.rules = rules
+        self.raw_rules = raw_rules if raw_rules is not None else list(rules)
         self.variables = variables
 
     def declarations_for(self, tag: Tag) -> dict[str, str]:
@@ -65,15 +76,16 @@ class StyleSheet:
         return merged
 
     def container_declarations(self) -> dict[str, str]:
-        """取正文容器自身的声明（原选择器仅由容器类名构成的那些规则）。
+        """取正文容器自身的声明。
 
-        容器不是元素选择器能命中的目标，因此单独取一次。产物中容器标签不带 class，
-        所以这些声明必须直接写到容器的 ``style`` 上。
+        容器规则在 CSS 中写作 ``.inloop-article``，规范化后会变成空字符串
+        （容器类名不参与元素匹配），因此必须按**原始选择器**查找。
+        产物中容器标签不带 class，所以这些声明只能直接写到容器的 ``style`` 上——
+        否则正文的基础字号、行高、颜色与字体族会全部丢失。
         """
         merged: dict[str, str] = {}
-        for selector, declarations in self.rules:
-            parts = selector.split()
-            if len(parts) == 1 and parts[0] == ARTICLE_TAG:
+        for selector, declarations in self.raw_rules:
+            if selector.strip() == CONTAINER_SELECTOR:
                 merged.update(declarations)
         return merged
 
@@ -133,6 +145,7 @@ def parse_css(text: str) -> StyleSheet:
 
     variables: dict[str, str] = {}
     rules: list[tuple[str, dict[str, str]]] = []
+    raw_rules: list[tuple[str, dict[str, str]]] = []
 
     for selector_block, body in re.findall(r"([^{}]+)\{([^{}]*)\}", cleaned):
         selectors = [s.strip() for s in selector_block.split(",") if s.strip()]
@@ -141,7 +154,10 @@ def parse_css(text: str) -> StyleSheet:
             if ":" not in item:
                 continue
             name, _, value = item.partition(":")
-            declarations[name.strip()] = value.strip()
+            # 折叠值中的空白：CSS 允许声明跨行书写，
+            # 但产物是内联样式，保留换行与缩进只会让 HTML 变脏。
+            normalized_value = re.sub(r"\s+", " ", value).strip()
+            declarations[name.strip()] = normalized_value
         if not declarations:
             continue
 
@@ -152,13 +168,20 @@ def parse_css(text: str) -> StyleSheet:
 
         for selector in selectors:
             _validate_selector(selector)
+            # 两份都留：规范化后的用于元素匹配，原始的用于识别容器规则
+            # （`.inloop-article` 规范化后为空字符串，无法再被识别）
             rules.append((normalize_selector(selector), declarations))
+            raw_rules.append((selector, declarations))
 
-    resolved = [
-        (selector, {k: _resolve_value(v, variables) for k, v in decls.items()})
-        for selector, decls in rules
-    ]
-    return StyleSheet(rules=resolved, variables=variables)
+    def resolve(items: list[tuple[str, dict[str, str]]]) -> list[tuple[str, dict[str, str]]]:
+        return [
+            (selector, {k: _resolve_value(v, variables) for k, v in decls.items()})
+            for selector, decls in items
+        ]
+
+    return StyleSheet(
+        rules=resolve(rules), variables=variables, raw_rules=resolve(raw_rules)
+    )
 
 
 #: 微信端无法内联、出现即报错的写法
@@ -316,11 +339,17 @@ def render_wechat_html(
 
     for tag in soup.find_all(True):
         declarations = sheet.declarations_for(tag)
+        existing_style = tag.get("style")
+        has_inline_style = isinstance(existing_style, str) and existing_style.strip() != ""
+
         if not declarations:
-            if tag.name not in STRUCTURAL_CONTAINERS:
+            # 元素已经带样式（例如语法着色生成的 token span）时不算"漏样式"：
+            # 这些样式来自 Pygments，不由样式表提供。
+            if not has_inline_style and tag.name not in STRUCTURAL_CONTAINERS:
                 unstyled.setdefault(tag.name, None)
             continue
-        tag["style"] = merge_styles(tag.get("style"), declarations)
+
+        tag["style"] = merge_styles(existing_style if has_inline_style else None, declarations)
 
     _force_wechat_safe_attributes(soup)
 
@@ -454,6 +483,10 @@ def _apply_code_highlighting(soup: BeautifulSoup) -> None:
         token_styles = _token_style_map(formatter)
 
         fragment = BeautifulSoup(highlighted, "html.parser")
+        # Pygments 会为没有任何样式的 token（标点、空白）也生成 <span>。
+        # 它们保留下来只会让 HTML 变长，并制造"未匹配样式"的噪音告警，
+        # 因此先记下样式，再把空 span 解开。
+        plain_spans: list[Tag] = []
         for span in fragment.find_all("span"):
             classes = span.get("class") or []
             declarations: dict[str, str] = {}
@@ -461,8 +494,14 @@ def _apply_code_highlighting(soup: BeautifulSoup) -> None:
                 declarations.update(token_styles.get(name, {}))
             if declarations:
                 span["style"] = to_style_attribute(declarations)
+            else:
+                plain_spans.append(span)
             # class 一律去掉：产物零 class
-            del span["class"]
+            if span.has_attr("class"):
+                del span["class"]
+
+        for span in plain_spans:
+            span.unwrap()
 
         code.clear()
         for child in list(fragment.children):

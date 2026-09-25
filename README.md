@@ -32,9 +32,18 @@
 
 ## 文章索引
 
-<!-- 索引由 `inloop index` 自动生成，请勿手工编辑本区块 -->
+<!-- inloop:index:begin -->
 
-待生成：`inloop index`（任务书 §14）尚未实现。
+共 4 篇。
+
+| ID | 日期 | 栏目 | 标题 | 状态 | 标签 |
+|---|---|---|---|---|---|
+| 001 | 2026-09-20 | 科研生活 | [开篇：为什么我要把技术内容做成一个仓库](articles/2026/001-hello-inloop/index.md) | published | 内容管理、写作、工作流 |
+| 002 | 2026-09-25 | 论文拆解 | [Light-O1：20Hz 人形基础模型到底意味着什么](articles/2026/002-light-o1/index.md) | review | Humanoid、Robot Learning、Foundation Model |
+| 003 | 2026-09-23 | 实验日志 | [RoboDojo 复现记录：从数据集到可训练策略](articles/2026/003-robodojo/index.md) | review | 复现、数据集、模仿学习 |
+| 004 | 2026-09-24 | 源码深挖 | [G1 抓取任务复盘：一次失败的策略与三条可用的经验](articles/2026/004-g1-reaching/index.md) | draft | 抓取、Sim2Real、调试 |
+
+<!-- inloop:index:end -->
 
 ## 栏目
 
@@ -65,12 +74,33 @@ pip install -e ".[dev]"
 inloop --help
 ```
 
-> **当前状态**：仓库处于第一阶段早期。可用命令只有 `inloop version`、`inloop info`、
-> `inloop root`；`new` / `check` / `build-wechat` / `preview-wechat` / `index`
-> 尚未实现，会在对应模块完成后逐条接入。构建与发布流程见 `docs/publishing-guide.md`。
->
-> 底层已可用：front matter 解析与文章模型（`inloop.parser.frontmatter`、
-> `inloop.models.article`）已实现，包含字段校验与规则码，但尚未接入命令行。
+## 常用命令
+
+| 命令 | 作用 |
+|---|---|
+| `inloop new --title "标题" --slug your-slug --template paper-note` | 新建文章 |
+| `inloop new --list` | 查看可用模板 |
+| `inloop check articles/2026/002-light-o1` | 校验一篇文章（Front Matter、图片、正文） |
+| `inloop build-wechat articles/2026/002-light-o1` | 生成微信公众号产物 |
+| `inloop preview-wechat 002-light-o1` | 构建并启动本地手机宽度预览 |
+| `inloop index` | 重新生成本文索引 |
+| `inloop status <article> ready` | 修改文章状态 |
+| `inloop rules` | 列出全部校验规则码 |
+
+`check` 的退出码：无问题为 `0`，存在 ERROR 为 `1`——可直接用于 CI。
+
+构建产物在 `dist/wechat/<slug>/` 下：`article.html` 是要复制进公众号后台的正文，
+`article.preview.html` 是本地预览页，`metadata.json` 是发布元数据。
+
+## 本地开发
+
+```bash
+python -m pytest          # 运行测试
+python -m ruff check .    # 静态检查
+```
+
+测试会直接对 `articles/` 下的**真实文章**跑完整构建，而不是只用简单样例——
+这样才能发现"简单样例很好看、真正技术文章一塌糊涂"的问题。
 
 ## 免责声明
 

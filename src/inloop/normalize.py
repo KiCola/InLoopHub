@@ -85,15 +85,32 @@ class NormalizeResult:
 
 
 def normalize_html(html: str) -> NormalizeResult:
-    """规范化 Markdown 渲染出的 HTML 片段。"""
+    """规范化 Markdown 渲染出的 HTML 片段。
+
+    处理顺序有依赖关系，不可随意调换：
+
+    1. 任务列表复选框 → 文本标记（必须在白名单清洗之前，否则 ``input`` 已被删除）
+    2. 脚注锚点 → 文末注释列表
+    3. 公式 → 等宽文本
+    4. 抽取图片清单（在改写之前取原值）
+    5. 白名单清洗（删除 ``script`` / ``iframe`` 等危险标签，解开未知标签）
+    6. 剥离 ``id`` / ``class``
+    """
     soup = BeautifulSoup(html, "html.parser")
     warnings: list[str] = []
 
+    checkbox_count = _downgrade_task_lists(soup)
     footnote_count = _downgrade_footnotes(soup)
     math_count = _downgrade_math(soup)
     images = _extract_images(soup)
+    removed_tags = sanitize_allowed_tags(soup)
     _strip_identifiers(soup)
 
+    if checkbox_count:
+        warnings.append(
+            f"任务列表复选框已降级为文本标记（{checkbox_count} 处）："
+            f"微信正文不支持表单元素。"
+        )
     if footnote_count:
         warnings.append(
             f"脚注已降级为文末注释列表（{footnote_count} 条）：微信正文不支持锚点跳转。"
@@ -101,6 +118,12 @@ def normalize_html(html: str) -> NormalizeResult:
     if math_count:
         warnings.append(
             f"公式已降级为等宽文本（{math_count} 处）：微信不支持 MathML 或前端公式渲染。"
+        )
+    if removed_tags:
+        distinct = "、".join(sorted(set(removed_tags)))
+        warnings.append(
+            f"产物中不允许出现的标签已被移除或解开：{distinct}。"
+            f"若其中包含有实际内容的标签（如 video），其内容不会出现在正文里。"
         )
 
     body = soup.body
@@ -112,6 +135,31 @@ def normalize_html(html: str) -> NormalizeResult:
         math_count=math_count,
         warnings=tuple(warnings),
     )
+
+
+# --- 任务列表 -------------------------------------------------------------
+
+#: 已勾选 / 未勾选的文本标记。不用 emoji：不同客户端对 emoji 的渲染差异很大。
+_CHECKED_MARKER = "☑"
+_UNCHECKED_MARKER = "☐"
+
+
+def _downgrade_task_lists(soup: BeautifulSoup) -> int:
+    """把任务列表的复选框换成文本标记。
+
+    markdown-it 的 tasklists 插件产出 ``<input type="checkbox">``，它是表单元素：
+    微信正文不支持，而且会被白名单清洗直接删除——那样"未完成/已完成"这个信息
+    就彻底丢了。因此这里先把状态转成文本，再让它被清洗掉。
+    """
+    count = 0
+    for checkbox in soup.find_all("input"):
+        if checkbox.get("type") != "checkbox":
+            continue
+        marker = _CHECKED_MARKER if checkbox.has_attr("checked") else _UNCHECKED_MARKER
+        # 保留一个空格，避免标记与后面的文字粘在一起
+        checkbox.replace_with(NavigableString(f"{marker} "))
+        count += 1
+    return count
 
 
 # --- 脚注 -----------------------------------------------------------------

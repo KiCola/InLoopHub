@@ -37,3 +37,7 @@ desktop.ini
 # 这类目录绝不应入库，加一条保险以免再次误提交。
 tmp??????/
 tmp*/
+
+# pytest 的临时根目录：同样可能因 TEMP 为相对路径而落到仓库根
+pytest-of-*/
+.pytest_tmp/

@@ -51,3 +51,8 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+# 显式指定临时目录的根，不用系统临时目录。
+# 原因：本机环境中 tempfile.gettempdir() 会回退到当前工作目录，
+# 于是 pytest 的 tmp_path 会在仓库根创建 pytest-of-<用户>/，污染工作区。
+# 指定到工作区内的固定路径后，位置确定、可被 .gitignore 覆盖、也便于排查。
+addopts = "--basetemp=.pytest_tmp"

@@ -90,6 +90,8 @@ MD_PARSE_FAILED = Rule("MD001", IssueLevel.ERROR, "Markdown 解析失败或产�
 MD_RAW_FOOTNOTE = Rule("MD101", IssueLevel.WARNING, "脚注在微信端无法跳转，已降级")
 MD_TABLE_RAGGED = Rule("MD102", IssueLevel.WARNING, "表格列数不一致")
 MD_MATH_UNSUPPORTED = Rule("MD103", IssueLevel.WARNING, "公式在微信端无法渲染，已降级为文本")
+MD_TASK_CHECKBOX = Rule("MD104", IssueLevel.WARNING, "任务列表复选框在微信端不可用，已降级为文本")
+MD_FORBIDDEN_TAG = Rule("MD105", IssueLevel.WARNING, "产物中不允许出现的标签已被移除")
 
 
 #: 全部规则，按规则码排序，便于展示与比对。
@@ -128,6 +130,8 @@ ALL_RULES: tuple[Rule, ...] = tuple(
             MD_RAW_FOOTNOTE,
             MD_TABLE_RAGGED,
             MD_MATH_UNSUPPORTED,
+            MD_TASK_CHECKBOX,
+            MD_FORBIDDEN_TAG,
         ),
         key=lambda rule: rule.code,
     )

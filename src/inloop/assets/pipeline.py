@@ -143,7 +143,13 @@ def prepare_images(
         if not _collect_source_issues(source, image, result, warning_bytes, error_bytes):
             continue
 
-        output_name = _unique_name(source.name, source, used_names)
+        try:
+            output_name = _unique_name(source.name, source, used_names)
+        except AssetError as exc:
+            # 收集而不是抛出：一次构建要能报出全部素材问题
+            result.errors.append(str(exc))
+            continue
+
         destination = images_dir / output_name
         _copy(source, destination)
 
@@ -303,21 +309,21 @@ def _unique_name(name: str, source: Path, used: dict[str, Path]) -> str:
     """为产物中的图片取一个不冲突的文件名。
 
     不同目录下的同名图片（如两篇都叫 ``architecture.png``）在产物里会被压平到
-    同一层，必须消歧，否则后一张会覆盖前一张。
+    同一层。若直接复制，后一张会静默覆盖前一张，正文里两张图都显示成同一张——
+    这种错误很难被发现，因此这里明确报错，让使用者自己决定怎么改。
     """
     existing = used.get(name)
     if existing is None or existing == source:
         used[name] = source
         return name
 
-    stem, suffix = Path(name).stem, Path(name).suffix
-    index = 2
-    while True:
-        candidate = f"{stem}-{index}{suffix}"
-        if candidate not in used:
-            used[candidate] = source
-            return candidate
-        index += 1
+    raise AssetError(
+        f"产物中的图片文件名冲突：`{name}`\n"
+        f"  来源一：{existing}\n"
+        f"  来源二：{source}\n"
+        f"修正方法：把其中一张改名（例如 `architecture-1.png`），"
+        f"并同步修改正文中的引用。产物目录是平铺的，同名会互相覆盖。"
+    )
 
 
 def _copy(source: Path, destination: Path) -> None:
