@@ -26,6 +26,16 @@
 - **先确认环境可用。** 至少确认解释器/运行时版本、所需命令行工具、以及能否在工作目录内执行命令。
 - **环境不可用时停下报告**，不得凭推测继续写代码，也不得用"应该可以"替代验证。
 - **先看现状再动手。** 修改前先读相关文件与最近的改动，不凭印象改代码。
+- **环境事实要沉淀。** 踩过的环境坑（工具路径、权限、沙箱限制）要写进本文件，不靠记忆传递。
+
+### 2.1 本机环境事实（Windows / `E:\InLoopHub`）
+
+- `git` 不在 shell 的 PATH 里，完整路径为 `C:\Program Files\Git\cmd\git.exe`，调用时用完整路径。
+- Python 为 `C:\Python313\python.exe`（3.13），`python` 可直接使用。
+- **沙箱能力边界**：默认 workspace-write 模式下，MSYS2 系程序（`sh.exe`、`git` 的联网子进程、credential manager）会因无法创建命名对象而崩溃（`NtCreateDirectoryObject ... 0xC0000022`）。
+  - 结论：**本地 git 操作（`add` / `commit` / `log` / `status`）在默认模式下可用；`push`、`fetch`、`clone` 与 `pip install` 需要完整权限模式。**
+  - 这类操作属于 §9 的申请情形，必须显式申请，**不得**静默降级为"跳过推送"并当作已完成。
+- 工作目录 `E:\InLoopHub` 的属主与显式 ACE 已配置（`ZERO\zzr:(OI)(CI)(F)`），默认沙箱在工作区内可正常读写与执行。
 
 ---
 
