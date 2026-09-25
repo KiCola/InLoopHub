@@ -74,7 +74,7 @@
   line-height: 1.85;
 }
 
-.inloop-article blockquote p:last-child {
+.inloop-article blockquote p + p {
   margin-bottom: 0;
 }
 

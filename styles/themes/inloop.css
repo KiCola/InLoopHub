@@ -2,11 +2,14 @@
    主题 · inloop（本项目默认）
    ==========================================================================
 
-   这是综合选定的主题：
+   风格定位：**当前默认**。标题带主色下划线，二级标题浅底框，
+   卡片圆角 + 主色左竖线，节奏偏紧凑。
+
+   具体形态：
 
    - **一级标题**：主色数字 + 标题，下方 2px 主色下划线
    - **二级标题**：浅蓝底框 + 主色文字（编号仍写在标题里）
-   - **正文节奏**：行高 1.75、段间距 24px
+   - **正文节奏**：字号 15px、行高 1.75、段间距 24px
    - **卡片**：浅底圆角 + 左侧主色竖线
 
    两种卡片仍然互斥：
@@ -80,17 +83,31 @@
   line-height: 1.75;
 }
 
-.inloop-article blockquote p:last-child {
+.inloop-article blockquote p + p {
   margin-bottom: 0;
 }
 
-/* 深底圆角卡片：引述外部内容时使用（正文写作 `> > 引文`）。
-   这里必须把 border-left 一并写全：只写 background 会让浏览器的简写重置
-   base.css 里设置的 border-left-color，结果是深底上的竖线仍用主色、几乎看不见。 */
+/* 深底卡片：引述外部内容时使用（正文写作 `> > 引文`）。
+
+   语法上 `> >` 就是嵌套引用，因此深底卡片必然嵌在浅底卡片内。按"外层是否
+   还有别的内容"分两种处理：
+
+   1. 外层只包着这一张深底卡片（深底是唯一子元素）→ 去掉外层的底色、圆角与内距，
+      让它不显示出来。这样观感就是**一张干净的深底卡片**，不出现框套框。
+      用 `:only-child` 判断，这是 CSS 标准伪类，由构建内联后依然按结构生效。
+   2. 外层还写着别的话（例如作者的一句说明）+ 深底引文 → 保留外层浅底框，
+      它起"分组"作用：把作者的话与引文归在一起，同时深底块上下留出间距。 */
+.inloop-article blockquote:has(> blockquote:only-child) {
+  padding: 0;
+  border-left: none;
+  background: transparent;
+}
+
 .inloop-article blockquote blockquote {
+  margin: 14px 0;
   padding: 20px 22px;
   border-radius: 8px;
-  border-left: 3px solid #4b5563;
+  border-left: none;
   background: var(--brand-dark-bg);
 }
 

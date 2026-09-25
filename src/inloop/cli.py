@@ -515,26 +515,30 @@ def build_wechat(
 
 @app.command("themes")
 def themes() -> None:
-    """列出可用的排版主题。"""
-    from inloop.renderer.wechat import available_themes, theme_name
+    """列出可用的排版主题及其定位。"""
+    from inloop.renderer.wechat import theme_name
+    from inloop.rendering import describe_themes
 
     config = _config_or_fail()
-    names = available_themes(config)
-    if not names:
+    entries = describe_themes(config)
+    if not entries:
         console.print("styles/themes/ 下没有主题文件。")
         return
 
     current = theme_name(config)
     console.print("[bold]可用主题[/bold]")
-    for name in names:
+    for name, purpose in entries:
         mark = " [green]（当前）[/green]" if name == current else ""
-        console.print(f"  [bold]{name}[/bold]{mark}")
+        detail = f"  {purpose}" if purpose else ""
+        console.print(f"  [bold]{name}[/bold]{mark}{detail}")
 
     console.print()
     console.print(
         f"切换方式：改 {_relative(config.root / 'config' / 'wechat.yaml', config.root)} "
         f"的 `theme`，或用 `inloop build-wechat <文章> --theme <名称>` 临时指定。"
     )
+    themes_readme = _relative(config.root / "styles" / "themes" / "README.md", config.root)
+    console.print(f"主题清单与调参入口：{themes_readme}")
 
 
 @app.command("preview-wechat")

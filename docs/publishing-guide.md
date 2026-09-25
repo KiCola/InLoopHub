@@ -37,9 +37,13 @@ inloop preview-wechat <article> 本地预览，确认手机上的观感
 |---|---|
 | `article.html` | **要复制到公众号的正文** |
 | `article.preview.html` | 本地预览外壳，模拟手机宽度，不用于发布 |
-| `metadata.json` | 标题、摘要、封面等元数据，也供后续平台接口复用 |
+| `metadata.json` | 标题、摘要、封面等元数据，以及本次生效的 `render_options` |
 | `images/` | 正文图片实体文件 |
 | `cover.png` | 封面图 |
+
+`metadata.json` 里的 `render_options` 记录了本次构建实际生效的排版选项
+（主题名、字号、行高、段间距等）。样式后续会调整，因此这份记录是回看旧文章时
+"当时长什么样"的唯一依据，不要手工删改。
 
 ## 操作要点
 

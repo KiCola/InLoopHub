@@ -40,6 +40,7 @@ from inloop.renderer.wechat import (
     render_wechat_html,
     theme_name,
 )
+from inloop.rendering import RenderOptions, collect_render_options, theme_meta_tag
 
 #: 产物根目录名（相对仓库根）
 DIST_DIR = "dist"
@@ -152,11 +153,17 @@ def build_article(
     rewritten_html = _rewrite_image_sources(normalized.html, assets.src_to_output)
 
     # 5) 加样式：CSS 内联 + 白名单清洗
+    active_theme = theme or theme_name(resolved_config)
     try:
-        stylesheet = load_stylesheet(resolved_config, theme or theme_name(resolved_config))
+        stylesheet = load_stylesheet(resolved_config, active_theme)
         wechat = render_wechat_html(rewritten_html, config=resolved_config, stylesheet=stylesheet)
     except StyleError as exc:
         raise BuildError(str(exc)) from exc
+
+    # 记录本次生效的渲染选项：样式会被不断调整，产物里不留记录就无法复现观感
+    render_options = collect_render_options(
+        resolved_config, theme=active_theme, stylesheet=stylesheet
+    )
 
     warnings.extend(wechat.warnings)
     if wechat.unstyled_tags:
@@ -171,6 +178,7 @@ def build_article(
         article,
         repo_root=repo_root,
         image_paths=_image_relative_paths(assets),
+        render_options=render_options,
     )
 
     files: list[Path] = []
@@ -178,8 +186,14 @@ def build_article(
     preview_html = output_dir / PREVIEW_HTML
     metadata_json = output_dir / METADATA_JSON
 
-    _write(article_html, _document(wechat.html, title=article.title))
-    _write(preview_html, _preview_document(wechat.html, title=article.title))
+    _write(
+        article_html,
+        _document(wechat.html, title=article.title, theme=active_theme),
+    )
+    _write(
+        preview_html,
+        _preview_document(wechat.html, title=article.title, theme=active_theme),
+    )
     _write(metadata_json, json.dumps(metadata, ensure_ascii=False, indent=2) + "\n")
 
     # 产物清单一律使用**相对产物目录**的路径：绝对路径既会泄漏本机目录结构，
@@ -200,11 +214,16 @@ def build_article(
 
 
 def build_metadata(
-    article: Article, *, repo_root: Path, image_paths: list[str]
+    article: Article,
+    *,
+    repo_root: Path,
+    image_paths: list[str],
+    render_options: RenderOptions,
 ) -> dict[str, object]:
     """构造 ``metadata.json`` 的内容（任务书 §12）。
 
     键序固定：便于 diff，也便于将来自动化接口按稳定结构读取。
+    ``render_options`` 记录本次生效的排版选项，使观感可复现。
     """
     source = article.source
     # 用绝对路径比较：article.source 可能是相对路径（取决于调用方怎么构造 Article），
@@ -229,6 +248,7 @@ def build_metadata(
         "category": str(article.category),
         "tags": list(article.tags),
         "images": image_paths,
+        "render_options": render_options.as_metadata(),
         "generated_at": _generated_at(),
     }
 
@@ -260,14 +280,17 @@ def _image_relative_paths(assets: AssetResult) -> list[str]:
 # --- HTML 文档 ------------------------------------------------------------
 
 
-def _document(body_html: str, *, title: str) -> str:
+def _document(body_html: str, *, title: str, theme: str) -> str:
     """生成完整的独立 HTML 文档（含 UTF-8 声明）。
 
     微信编辑器取的是其中的正文片段；声明编码是为了本地打开时不出现乱码。
+    同时写入记录主题的 meta：样式会被不断调整，产物里留下主题名，
+    才能回答"这个 HTML 是用哪套样式渲染的"。
     """
     return (
         "<!DOCTYPE html>\n"
         '<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n'
+        f"{theme_meta_tag(theme)}\n"
         f"<title>{_escape(title)}</title>\n"
         "</head>\n<body>\n"
         f"{body_html}\n"
@@ -275,7 +298,7 @@ def _document(body_html: str, *, title: str) -> str:
     )
 
 
-def _preview_document(body_html: str, *, title: str) -> str:
+def _preview_document(body_html: str, *, title: str, theme: str) -> str:
     """生成手机宽度预览外壳（任务书 §13）。
 
     外壳样式**内联在元素上**，不引入外部 CSS——预览页必须能离线双击打开。
@@ -297,6 +320,7 @@ def _preview_document(body_html: str, *, title: str) -> str:
         "<!DOCTYPE html>\n"
         '<html lang="zh-CN">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"{theme_meta_tag(theme)}\n"
         f"<title>预览 · {_escape(title)}</title>\n"
         "</head>\n"
         f'<body style="{shell_style}">\n'

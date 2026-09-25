@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from bs4 import BeautifulSoup, Tag
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 from inloop.config import Config
 
@@ -252,6 +252,17 @@ def _validate_selector(selector: str) -> None:
             f"修正方法：改用元素选择器。"
         )
 
+    # 伪类：只允许已实现的那几个。不认识的必须报错——
+    # 若静默按"不匹配"处理，样式会悄悄失效，而这类问题极难发现。
+    for pseudo in re.findall(r":([a-z-]+)", lowered):
+        if pseudo not in _SUPPORTED_PSEUDO:
+            supported = "、".join(f":{name}" for name in _SUPPORTED_PSEUDO)
+            raise StyleError(
+                f"样式选择器使用了未支持的伪类：`:{pseudo}`（来自 `{selector}`）。\n"
+                f"修正方法：改用已支持的伪类（{supported}），"
+                f"或改用元素/后代选择器表达同样的意图。"
+            )
+
 
 def normalize_selector(selector: str) -> str:
     """去掉容器前缀，把 ``.inloop-article p`` 规范成 ``p``。
@@ -266,51 +277,213 @@ def normalize_selector(selector: str) -> str:
 def _matches(tag: Tag, selector: str) -> bool:
     """判断元素是否匹配选择器。
 
-    支持本项目用到的形式：``tag``、``tag tag``（后代）、``tag > tag``（子代）。
+    支持本项目用到的形式：
+
+    - ``tag``、``tag tag``（后代）、``tag > tag``（子代）、``tag + tag``（相邻兄弟）
+    - ``:only-child``（唯一子元素）
+    - ``:has(> tag:only-child)``（直接子元素中有唯一的该标签）
+
+    刻意**不支持** ``:last-child`` / ``:first-child`` 等其余伪类：
+    相邻兄弟组合器 ``+`` 已能表达"段间不叠加下边距"这类实际需求，
+    而且不依赖伪类。遇到未支持的伪类时**明确报错**，不静默按不匹配处理——
+    静默不匹配意味着样式悄悄失效，是最难发现的一类问题。
     """
     if not selector:
         return False
 
-    chain = selector.replace(">", " > ").split()
+    chain = _tokenize_selector(selector)
     return _match_chain(tag, chain)
 
 
+def _tokenize_selector(selector: str) -> list[str]:
+    """把选择器切成"简单选择器 + 组合器"的序列。
+
+    组合器统一成独立 token（``>`` ``+`` ``~`` 以及表示后代的 ``" "``）：
+
+        ``blockquote p``        → ``[blockquote, " ", p]``
+        ``blockquote > p``      → ``[blockquote, ">", p]``
+        ``blockquote p + p``    → ``[blockquote, " ", p, "+", p]``
+
+    ``:has(...)`` 内部的括号内容整体属于一个片段，不会在括号内被切开。
+    """
+    tokens: list[str] = []
+    buffer = ""
+    depth = 0
+
+    index = 0
+    while index < len(selector):
+        char = selector[index]
+        if char == "(":
+            depth += 1
+            buffer += char
+        elif char == ")":
+            depth = max(0, depth - 1)
+            buffer += char
+        elif depth > 0:
+            buffer += char
+        elif char in (">", "+", "~"):
+            if buffer.strip():
+                tokens.append(buffer.strip())
+            buffer = ""
+            tokens.append(char)
+        elif char.isspace():
+            if buffer.strip():
+                tokens.append(buffer.strip())
+            buffer = ""
+            # 连续空格只产生一个后代组合器；已以组合器结尾时不重复添加
+            if tokens and tokens[-1] not in (">", "+", "~", " "):
+                tokens.append(" ")
+        else:
+            buffer += char
+        index += 1
+
+    if buffer.strip():
+        tokens.append(buffer.strip())
+
+    # 规整组合器：去掉首尾组合器，并消除相邻组合器。
+    # 相邻组合器是写法冗余造成的（``p + p`` 在 ``+`` 前后各有一个空格，
+    # 会同时产生后代组合器与 ``+``），保留最靠右的那个即可。
+    cleaned: list[str] = []
+    for token in tokens:
+        is_combinator = token in (">", "+", "~", " ")
+        if is_combinator and (not cleaned or cleaned[-1] in (">", "+", "~", " ")):
+            # 连续组合器：用当前这个替换掉前一个（后者更贴近实际写法）
+            if cleaned:
+                cleaned[-1] = token
+            continue
+        cleaned.append(token)
+
+    while cleaned and cleaned[0] in (">", "+", "~", " "):
+        cleaned.pop(0)
+    while cleaned and cleaned[-1] in (">", "+", "~", " "):
+        cleaned.pop()
+    return cleaned
+
+
+#: 已实现的伪类
+_SUPPORTED_PSEUDO = ("only-child", "has")
+
+
 def _match_chain(tag: Tag, chain: list[str]) -> bool:
+    """按组合器从右向左求值选择器。
+
+    选择器被切成"简单选择器 + 组合器"的交替序列，例如
+    ``blockquote p + p`` → ``[blockquote] [p] + [p]``。
+
+    从最右的简单选择器开始：它必须匹配当前元素；然后按左侧的组合器
+    找到**用于继续验证的关联元素**（父 / 前一个兄弟 / 任意祖先），递归验证剩余部分。
+
+    注意组合器可能出现在中间（``a + b c`` 这类写法），因此不能只从右端识别。
+    """
     if not chain:
         return True
 
-    token = chain[-1]
-    if token == ">":
-        # 形如 [..., ">", "parent"]：当前是 parent 的子元素
-        if len(chain) < 2:
-            return False
-        parent_token = chain[0]
-        parent = tag.parent
-        return (
-            isinstance(parent, Tag)
-            and _tag_matches(parent, parent_token)
-            and _match_chain(parent, chain[:-2])
-        )
+    # 从右往左找到第一个组合器，得到「最右简单选择器」与其余部分
+    combinator_index = -1
+    for index in range(len(chain) - 1, -1, -1):
+        if chain[index] in (">", "+", "~", " "):
+            combinator_index = index
+            break
 
-    if not _tag_matches(tag, token):
+    if combinator_index == -1:
+        # 没有组合器：整段必须匹配当前元素
+        return all(_tag_matches(tag, token) for token in chain)
+
+    combinator = chain[combinator_index]
+    right = chain[combinator_index + 1 :]
+    left = chain[:combinator_index]
+    if not right:
         return False
 
-    remaining = chain[:-1]
-    if not remaining:
-        return True
+    if not all(_tag_matches(tag, token) for token in right):
+        return False
 
+    if combinator == ">":
+        parent = tag.parent
+        return isinstance(parent, Tag) and _match_chain(parent, left)
+    if combinator == "+":
+        previous = tag.find_previous_sibling()
+        return isinstance(previous, Tag) and _match_chain(previous, left)
+
+    # 后代组合器：" " 与 "~" 都是"任一祖先匹配即可"
     ancestor = tag.parent
     while isinstance(ancestor, Tag):
-        if _match_chain(ancestor, remaining):
+        if _match_chain(ancestor, left):
             return True
         ancestor = ancestor.parent
     return False
 
 
 def _tag_matches(tag: Tag, token: str) -> bool:
+    """判断元素是否匹配选择器中的单个片段（标签名 + 可选的伪类）。"""
     if token == "*":
         return True
-    return tag.name == token
+
+    name, pseudo = _split_pseudo(token)
+    if name and tag.name != name:
+        return False
+    if pseudo is None:
+        return True
+
+    kind, argument = pseudo
+    if kind == "only-child":
+        return _is_only_child(tag)
+    if kind == "has":
+        return _has_matching_child(tag, argument or "")
+    return False
+
+
+def _split_pseudo(token: str) -> tuple[str, tuple[str, str | None] | None]:
+    """把 ``blockquote:has(> blockquote:only-child)`` 拆成标签名与伪类。
+
+    Returns:
+        ``(标签名, (伪类名, 参数) 或 None)``。
+    """
+    if ":" not in token:
+        return token, None
+
+    name, _, rest = token.partition(":")
+    if "(" in rest:
+        kind, _, tail = rest.partition("(")
+        return name, (kind.strip(), tail.rstrip(")").strip())
+    return name, (rest.strip(), None)
+
+
+def _is_only_child(tag: Tag) -> bool:
+    """是否为父元素下唯一的一个标签子元素（忽略空白文本）。"""
+    parent = tag.parent
+    if not isinstance(parent, Tag):
+        return False
+    siblings = [
+        child
+        for child in parent.children
+        if isinstance(child, Tag) or (isinstance(child, NavigableString) and child.strip())
+    ]
+    return len(siblings) == 1
+
+
+def _has_matching_child(tag: Tag, argument: str) -> bool:
+    """实现 ``:has()`` 的受限形式：``> 选择器`` 表示直接子元素。
+
+    只支持本项目需要的形式（直接子元素匹配），不做完整的 CSS ``:has()``——
+    完整实现需要处理任意组合器与嵌套，收益与复杂度不成比例。
+    遇到看不懂的形式时**返回 False 并让上层校验拦住**，而不是猜测。
+    """
+    target = argument.strip()
+    if not target:
+        return False
+    if target.startswith(">"):
+        target = target[1:].strip()
+
+    # 去掉末尾的组合器（``tag >`` 与 ``> tag`` 两种写法都要能处理）
+    target = target.rstrip(">").strip()
+    if not target or " " in target:
+        return False
+
+    for child in tag.children:
+        if isinstance(child, Tag) and _tag_matches(child, target):
+            return True
+    return False
 
 
 def _resolve_value(value: str, variables: dict[str, str]) -> str:
@@ -395,6 +568,7 @@ def render_wechat_html(
         tag["style"] = merge_styles(existing_style if has_inline_style else None, declarations)
 
     _force_wechat_safe_attributes(soup)
+    _apply_config_overrides(soup, config, sheet)
 
     body = soup.body
     inner = "".join(str(child) for child in body.children) if body else str(soup)
@@ -407,6 +581,7 @@ def render_wechat_html(
     # 容器样式直接查规则表得到，不构造临时标签：
     # 在同一个 soup 上既取子节点又挂新容器，追加时会清空取到的内容。
     container_style = sheet.container_declarations()
+    container_style.update(resolve_typography(config, sheet)["container"])
     if container_style:
         style_attr = to_style_attribute(container_style)
         return WechatRenderResult(
@@ -434,8 +609,166 @@ def merge_styles(existing: str | None, declarations: dict[str, str]) -> str:
 
 
 def to_style_attribute(declarations: dict[str, str]) -> str:
-    """把声明字典写成 ``style`` 属性值，保持稳定顺序。"""
-    return "".join(f"{name}:{value};" for name, value in declarations.items())
+    """把声明字典写成 ``style`` 属性值。
+
+    会丢掉**被简写完全覆盖的长写**：若同时存在 ``border-left`` 与
+    ``border-left-color``，只保留前者（``border-left`` 已包含颜色）。
+
+    不这样做的话，产物里会留下 ``border-left:none; border-left-color:#4b5563``
+    这类自相矛盾的组合——规范上简写获胜、结果正确，但读起来像是有意为之，
+    而且顺序一旦被工具调整就会静默改变渲染。
+    """
+    effective = _drop_covered_longhands(declarations)
+    return "".join(f"{name}:{value};" for name, value in effective.items())
+
+
+#: 简写属性 → 它包含的长写属性
+_SHORTHANDS: dict[str, tuple[str, ...]] = {
+    "margin": ("margin-top", "margin-right", "margin-bottom", "margin-left"),
+    "padding": ("padding-top", "padding-right", "padding-bottom", "padding-left"),
+    "border": ("border-width", "border-style", "border-color"),
+    "border-left": ("border-left-width", "border-left-style", "border-left-color"),
+    "background": ("background-color", "background-image"),
+    "font": ("font-size", "font-family", "font-weight", "line-height"),
+}
+
+
+def _drop_covered_longhands(declarations: dict[str, str]) -> dict[str, str]:
+    """去掉已被简写属性覆盖的长写属性。"""
+    result: dict[str, str] = {}
+    for name, value in declarations.items():
+        covered = any(
+            name in longhands and shorthand in declarations
+            for shorthand, longhands in _SHORTHANDS.items()
+        )
+        if covered:
+            continue
+        result[name] = value
+    return result
+
+
+def _config_value(config: Config, key: str) -> str | None:
+    """读一个渲染配置项；缺失或不可用时返回 None。
+
+    这里**只记录与覆盖**，不负责校验配置完整性——那是 config 层与 check 的职责。
+    """
+    try:
+        value = config.wechat_value(key)
+    except Exception:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def resolve_typography(config: Config, sheet: StyleSheet) -> dict[str, dict[str, str]]:
+    """确定正文排版参数最终生效的取值。
+
+    优先级 **主题 > 配置**：主题的职责就是决定节奏，配置只在主题未定义时补位。
+    这样新增主题可以只写标题与卡片形式，正文参数自动沿用配置。
+
+    渲染与 ``render_options`` 记录**共用本函数**，因此"记录 = 产物"由结构保证，
+    而不是靠两处各写一遍再人工对齐。
+
+    间距统一用**一个 ``margin`` 简写**输出，不混用 ``margin`` 与 ``margin-bottom``：
+    两者并存时哪条生效取决于书写顺序，产物里同时出现会变成难以判断的写法。
+
+    Returns:
+        ``{"container": {...}, "paragraph": {...}}``，值为可直接写入 style 的属性。
+    """
+    container = sheet.container_declarations()
+
+    font_size = container.get("font-size") or _px(_config_value(config, "font_size") or "")
+    line_height = container.get("line-height") or _config_value(config, "line_height") or ""
+
+    paragraph: dict[str, str] = {}
+    if font_size:
+        paragraph["font-size"] = font_size
+    if line_height:
+        paragraph["line-height"] = line_height
+
+    margin = _resolve_paragraph_margin(config, sheet)
+    if margin:
+        paragraph["margin"] = margin
+
+    resolved_container: dict[str, str] = {}
+    if font_size:
+        resolved_container["font-size"] = font_size
+    if line_height:
+        resolved_container["line-height"] = line_height
+
+    return {"container": resolved_container, "paragraph": paragraph}
+
+
+def _resolve_paragraph_margin(config: Config, sheet: StyleSheet) -> str:
+    """确定正文段落的 margin，返回简写形式。
+
+    以主题声明的 margin 为基准，只把**主题未给出**的方向用配置补齐。
+    这样不会出现"主题给简写、配置给长写"的冲突。
+    """
+    parts = _parse_margin(_paragraph_margin(sheet))
+    spacing = _px(_config_value(config, "paragraph_spacing") or "")
+    if spacing and not parts[2]:
+        parts[2] = spacing
+    if not any(parts):
+        return ""
+
+    top, right, bottom, left = parts
+    if left == right:
+        if top == bottom:
+            return f"{top or '0'} {right or '0'}"
+        return f"{top or '0'} {right or '0'} {bottom or '0'}"
+    return f"{top or '0'} {right or '0'} {bottom or '0'} {left or '0'}"
+
+
+#: margin 简写解出的四个方向，顺序为 上 右 下 左
+_MARGIN_SLOTS = 4
+
+
+def _parse_margin(value: str) -> list[str]:
+    """把 margin 简写解成 ``[上, 右, 下, 左]``；缺省方向按 CSS 规则展开。"""
+    tokens = value.split() if value else []
+    if not tokens:
+        return [""] * _MARGIN_SLOTS
+    if len(tokens) == 1:
+        return [tokens[0]] * _MARGIN_SLOTS
+    if len(tokens) == 2:
+        return [tokens[0], tokens[1], tokens[0], tokens[1]]
+    if len(tokens) == 3:
+        return [tokens[0], tokens[1], tokens[2], tokens[1]]
+    return tokens[:_MARGIN_SLOTS]
+
+
+def _paragraph_margin(sheet: StyleSheet) -> str:
+    """从样式表取段落 margin 简写；取不到时返回空串。"""
+    for selector, declarations in sheet.rules:
+        if selector == "p":
+            return declarations.get("margin", "")
+    return ""
+
+
+def _apply_config_overrides(soup: BeautifulSoup, config: Config, sheet: StyleSheet) -> None:
+    """把 :func:`resolve_typography` 的结果写到段落的 ``style`` 上。
+
+    只在段落**尚无**对应声明时补上，不覆盖模板或着色阶段已写入的样式。
+    """
+    typography = resolve_typography(config, sheet)
+    for tag in soup.find_all("p"):
+        existing = tag.get("style")
+        current = existing if isinstance(existing, str) else ""
+        overrides = {
+            name: value
+            for name, value in typography["paragraph"].items()
+            if f"{name}:" not in current
+        }
+        if overrides:
+            tag["style"] = merge_styles(
+                existing if isinstance(existing, str) else None, overrides
+            )
+
+
+def _px(value: str) -> str:
+    """补上 px 单位；已经是长度值时原样返回。"""
+    return value if value.endswith(("px", "%", "em", "rem")) else f"{value}px"
 
 
 def _force_wechat_safe_attributes(soup: BeautifulSoup) -> None:

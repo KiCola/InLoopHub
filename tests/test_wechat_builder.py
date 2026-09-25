@@ -22,6 +22,8 @@ from inloop.build import (
 )
 from inloop.config import load_config
 from inloop.models.article import Article
+from inloop.renderer.wechat import theme_name
+from inloop.rendering import read_theme_from_html
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG = load_config(REPO_ROOT)
@@ -146,6 +148,7 @@ def test_元数据字段与键序稳定() -> None:
         "category",
         "tags",
         "images",
+        "render_options",
         "generated_at",
     ]
     assert metadata["platform"] == "wechat"
@@ -154,6 +157,81 @@ def test_元数据字段与键序稳定() -> None:
     # source 用仓库相对路径
     assert metadata["source"].startswith("articles/")
     assert not Path(metadata["source"]).is_absolute()
+
+
+def test_渲染选项被记录且与产物一致() -> None:
+    """样式会不断调整，产物里必须能查到"当时用的是哪套选项"。
+
+    记录值必须与产物里真正写入的值一致——不一致比不记录更糟，
+    会让人以为观感是 A、实际是 B。
+    """
+    import re
+
+    article = load_article(REAL_ARTICLES[0])
+    outcome = build_article(article, config=CONFIG)
+    metadata = json.loads((outcome.output_dir / METADATA_JSON).read_text(encoding="utf-8"))
+    options = metadata["render_options"]
+
+    assert options["theme"] == theme_name(CONFIG)
+    assert options["body_font_size"]
+    assert options["body_line_height"]
+    assert options["paragraph_spacing"]
+
+    html = (outcome.output_dir / ARTICLE_HTML).read_text(encoding="utf-8")
+    # 必须取**正文**里的段落，而不是卡片内的段落：
+    # 卡片内部有自己的内距，`render_options` 记录的是正文段距。
+    from bs4 import BeautifulSoup
+
+    container = BeautifulSoup(html, "html.parser").find("div")
+    assert container is not None
+    body_paragraph = next(
+        (p for p in container.find_all("p") if p.find_parent("blockquote") is None),
+        None,
+    )
+    assert body_paragraph is not None, "文章应至少有一个正文段落"
+
+    style = body_paragraph.get("style") or ""
+    assert f"font-size:{options['body_font_size']}" in style
+    assert f"line-height:{options['body_line_height']}" in style
+
+    # 段落间距可能写作 `margin` 简写，也可能写作 `margin-bottom`；
+    # 按 CSS 的展开规则取实际生效的下边距，避免把断言绑死在写法上。
+    spacing = options["paragraph_spacing"]
+    shorthand = re.search(r"margin:([^;]+)", style)
+    if shorthand:
+        parts = shorthand.group(1).split()
+        bottom = parts[0] if len(parts) == 1 else (parts[0] if len(parts) == 2 else parts[2])
+        assert bottom == spacing, f"简写中的下边距 {bottom} 与记录 {spacing} 不一致"
+    else:
+        assert f"margin-bottom:{spacing}" in style
+
+
+def test_产物_HTML_记录主题名() -> None:
+    """只拿到一个 HTML 文件时，也应能判断它是哪个主题渲染的。"""
+    article = load_article(REAL_ARTICLES[0])
+    outcome = build_article(article, config=CONFIG)
+
+    for name in (ARTICLE_HTML, PREVIEW_HTML):
+        html = (outcome.output_dir / name).read_text(encoding="utf-8")
+        assert read_theme_from_html(html) == theme_name(CONFIG), name
+
+
+def test_指定主题时记录的值随主题变化() -> None:
+    """临时换主题构建，产物与记录都要跟着变。
+
+    注意：两次构建写的是同一个产物目录，因此必须在**每次构建后立刻**读取
+    它自己返回的 metadata，不能等两次都建完再去读文件——那样读到的是后一次的覆盖结果。
+    """
+    article = load_article(REAL_ARTICLES[0])
+
+    default_options = build_article(article, config=CONFIG).metadata["render_options"]
+    other_options = build_article(article, config=CONFIG, theme="generous").metadata[
+        "render_options"
+    ]
+
+    assert default_options["theme"] == theme_name(CONFIG)
+    assert other_options["theme"] == "generous"
+    assert other_options["body_line_height"] != default_options["body_line_height"]
 
 
 def test_有_ERROR_时拒绝构建且不产出文件(mini_repo: Path) -> None:
