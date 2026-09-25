@@ -41,3 +41,8 @@ tmp*/
 # pytest 的临时根目录：同样可能因 TEMP 为相对路径而落到仓库根
 pytest-of-*/
 .pytest_tmp/
+
+# --- 独立审核 Agent 的临时脚本 ---
+# 审核者在每次审核时会自建验证脚本（前缀 _audit_），它们是用完即弃的，
+# 不属于交付物。审核结束后由审核者或主 Agent 删除；这里先挡住避免误提交。
+scripts/utils/_audit_*.py

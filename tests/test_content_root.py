@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -76,6 +77,20 @@ def make_article(content_root: Path, slug: str = "ext-test", number: int = 1) ->
     return directory
 
 
+def write_content_section(mini_repo: Path, *, root: str = "", dist: str = "") -> None:
+    """把 ``content`` 段整体替换成给定的值。
+
+    用正则整段替换而不是在某处插入：``site.yaml`` 里**本来就有** content 段，
+    插入会产生重复键，YAML 取后者——测试就测不出配置到底有没有生效。
+    """
+    site = mini_repo / "config" / "site.yaml"
+    text = site.read_text(encoding="utf-8")
+    text = re.sub(r"(?ms)^content:.*\Z", "", text).rstrip() + (
+        f'\n\ncontent:\n  root: "{root}"\n  dist: "{dist}"\n'
+    )
+    site.write_text(text, encoding="utf-8", newline="\n")
+
+
 @pytest.fixture()
 def external_content(tmp_path: Path) -> Path:
     """一个**与工具仓库无关**的内容目录。
@@ -95,6 +110,43 @@ def test_兜底到仓库内的_articles() -> None:
     """四级都没配置时回退到 <repo>/articles，保证开箱可用。"""
     resolved = CONFIG.resolve_content_root()
     assert resolved == CONFIG.root / "articles"
+
+
+def test_从真实配置文件读取_content_root(mini_repo: Path, tmp_path: Path) -> None:
+    """必须让 ``load_config`` **真的去读配置文件**，而不是手工构造 Config。
+
+    这条测试是独立审核 Agent 指出漏测后补的：原先只测了环境变量与手工构造的
+    ``Config(content={"root": ""})``——后者绕过了加载流程，等于测试自己构造输入。
+    结果 ``load_config`` 里"先 pop 再读"的 bug（content 段永远读到空）
+    在 180 项测试全绿的情况下漏了过去，而且**静默回退**到 ``articles/``。
+
+    教训：配置层的测试必须走完整的"写文件 → 加载 → 断言"路径。
+    """
+    target = tmp_path / "my-content"
+    target.mkdir()
+    write_content_section(mini_repo, root=target.as_posix())
+
+    loaded = load_config(mini_repo)
+    assert loaded.content.get("root"), "配置文件的 content 段没有被读到"
+    assert loaded.resolve_content_root() == target.resolve()
+
+
+def test_配置文件里的_content_dist_生效(mini_repo: Path, tmp_path: Path) -> None:
+    """与上一条同理：dist 也必须真的从配置文件读出来。"""
+    target = tmp_path / "my-dist"
+    write_content_section(mini_repo, dist=target.as_posix())
+    assert load_config(mini_repo).resolve_dist_root() == target.resolve()
+
+
+def test_配置文件里指向不存在的目录会报错(mini_repo: Path, tmp_path: Path) -> None:
+    """照文档填错了路径必须报错，不能静默回退——静默回退让人无从判断原因。"""
+    missing = tmp_path / "typo-here"
+    write_content_section(mini_repo, root=missing.as_posix())
+
+    with pytest.raises(ConfigError) as excinfo:
+        load_config(mini_repo).resolve_content_root()
+    assert str(missing) in str(excinfo.value)
+    assert "content.root" in str(excinfo.value)
 
 
 def test_命令行参数优先级最高(external_content: Path) -> None:

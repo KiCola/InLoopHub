@@ -57,6 +57,7 @@ EXIT_VALIDATION_FAILED = 1
 #: 用模块级变量而不是 Context 对象：命令实现里到处都要取内容目录，
 #: 每次穿透 ctx.obj 会让签名变吵，而这是一个"进程级"设置。
 _content_override: Path | None = None
+_json_mode: bool = False
 
 
 def _config_or_fail() -> Config:
@@ -83,6 +84,7 @@ def _content_root_or_fail(config: Config) -> Path:
 
 @app.callback()
 def main_callback(
+    ctx: typer.Context,
     content: Annotated[
         Path | None,
         typer.Option(
@@ -91,16 +93,53 @@ def main_callback(
             "再按 config/site.yaml 的 content.root，最后回退到仓库内的 articles/。",
         ),
     ] = None,
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="输出机器可读的 JSON（供编辑器插件等外部程序调用）。"
+            "stdout 只含 JSON，人类可读的提示走 stderr。",
+        ),
+    ] = False,
 ) -> None:
     """InLoop 手记：把 Markdown 内容仓库构建为微信公众号文章。"""
-    global _content_override  # noqa: PLW0603 - 进程级设置，见上方说明
+    global _content_override, _json_mode  # noqa: PLW0603 - 进程级设置，见上方说明
     _content_override = content
+    _json_mode = as_json
+    ctx.obj = {"content": content, "json": as_json}
 
 
-def _fail(message: str) -> None:
-    """以统一格式输出错误并退出。错误信息必须包含修正建议。"""
+def _json_output() -> bool:
+    """当前是否处于 JSON 输出模式。"""
+    return _json_mode
+
+
+def _fail(message: str, *, code: str = "command_failed", hint: str = "") -> None:
+    """以统一格式输出错误并退出。错误信息必须包含修正建议。
+
+    JSON 模式下仍在 **stdout** 输出一份合法 JSON：调用方不必解析 stderr 的文本，
+    只要看 ``ok: false`` 与 ``error.code``。退出码依旧非 0。
+
+    **这是错误输出的唯一出口。** 调用点不要再单独调用 ``jsonapi.emit_error``——
+    两处都发会把两份 JSON 写进 stdout，调用方 ``json.loads`` 直接失败
+    （这个 bug 真出现过）。
+    """
+    if _json_output():
+        from inloop import jsonapi
+
+        jsonapi.emit_error(code, message, hint=hint)
     err_console.print(f"[bold red]✗[/bold red] {escape(message)}")
     raise typer.Exit(code=EXIT_VALIDATION_FAILED)
+
+
+def _out(message: str) -> None:
+    """打印人类可读信息。
+
+    JSON 模式下改走 stderr：stdout 必须留给 JSON，
+    否则调用方 ``json.loads(stdout)`` 会失败。
+    """
+    target = err_console if _json_output() else console
+    target.print(message)
 
 
 def _read_article(location: ArticleLocation) -> Article:
@@ -514,7 +553,7 @@ def check(
     try:
         location = resolve_article(content_root, target)
     except ArticleNotFoundError as exc:
-        _fail(str(exc))
+        _fail(str(exc), code="article_not_found", hint="用 `inloop list` 查看可用文章。")
         return
 
     try:
@@ -522,20 +561,33 @@ def check(
             location.index.read_text(encoding="utf-8"), source=location.index
         )
     except ArticleError as exc:
-        err_console.print(f"[bold red]✗[/bold red] {escape(str(exc))}")
-        console.print(f"{_display_path(location.index, config, content_root)} ERROR 结构错误")
-        raise typer.Exit(code=EXIT_VALIDATION_FAILED) from exc
+        _fail(
+            f"{_display_path(location.index, config, content_root)} 结构错误：{exc}",
+            code="article_unparsable",
+            hint="检查该文件的 Front Matter（两行 --- 之间）与正文结构。",
+        )
+        return
+
+    if _json_output():
+        from inloop import jsonapi
+
+        jsonapi.emit(jsonapi.check_payload(article, location, base=content_root))
+        if article.errors:
+            raise typer.Exit(code=EXIT_VALIDATION_FAILED)
+        return
 
     _report_one(article, location, config, content_root, quiet=quiet)
 
 
 def _check_all(config: Config, content_root: Path, *, quiet: bool) -> None:
-    """检查内容目录里的全部文章。
+    """检查内容目录里的全部文章（任务书 §7.5 支持 --json）。
 
     用途：工具自带的示例文章覆盖不到作者的真实内容，因此需要一条
     "把我所有文章过一遍"的命令。**空目录不算通过**——没有文章就无从谈起
     "检查通过"，那会给出虚假的安心感。
     """
+    from inloop import jsonapi
+
     locations = find_articles(content_root)
     if not locations:
         _fail(
@@ -545,13 +597,15 @@ def _check_all(config: Config, content_root: Path, *, quiet: bool) -> None:
         )
         return
 
-    console.print(f"[bold]检查 {len(locations)} 篇文章[/bold]")
-    console.print(f"  内容目录：{content_root}")
-    console.print()
+    if not _json_output():
+        console.print(f"[bold]检查 {len(locations)} 篇文章[/bold]")
+        console.print(f"  内容目录：{content_root}")
+        console.print()
 
     errors = 0
     warnings = 0
     unparsable = 0
+    items: list[dict] = []
     for location in locations:
         try:
             article = Article.from_text(
@@ -560,15 +614,41 @@ def _check_all(config: Config, content_root: Path, *, quiet: bool) -> None:
         except (ArticleError, OSError) as exc:
             unparsable += 1
             errors += 1
+            if _json_output():
+                items.append(
+                    jsonapi.unparsable_to_dict(
+                        location, base=content_root, reason=str(exc)
+                    )
+                )
             err_console.print(
                 f"[bold red]✗[/bold red] {_display_path(location.index, config, content_root)}"
                 f" 结构错误：{escape(str(exc))}"
             )
             continue
 
+        if _json_output():
+            items.append(jsonapi.article_to_dict(article, location, base=content_root))
+            errors += len(article.errors)
+            warnings += len(article.warnings)
+            continue
+
         count = _report_one(article, location, config, content_root, quiet=quiet)
         errors += count[0]
         warnings += count[1]
+
+    if _json_output():
+        jsonapi.emit(
+            jsonapi.check_all_payload(
+                items,
+                content_root=content_root,
+                error_count=errors,
+                warning_count=warnings,
+                unparsable=unparsable,
+            )
+        )
+        if errors:
+            raise typer.Exit(code=EXIT_VALIDATION_FAILED)
+        return
 
     console.print()
     summary = (
@@ -650,8 +730,20 @@ def build_wechat(
             article, config=config, content_root=content_root, theme=theme
         )
     except BuildError as exc:
-        err_console.print(f"[bold red]✗[/bold red] {escape(str(exc))}")
-        raise typer.Exit(code=EXIT_VALIDATION_FAILED) from exc
+        _fail(
+            str(exc),
+            code="build_failed",
+            hint="先运行 `inloop check <slug>` 定位内容问题。",
+        )
+        return
+
+    if _json_output():
+        from inloop import jsonapi
+
+        jsonapi.emit(jsonapi.build_payload(outcome, content_root=content_root))
+        # 警告仍走 stderr，便于人类看到而污染不到 stdout
+        _print_warnings(outcome.warnings)
+        return
 
     console.print(
         f"[bold green]✓[/bold green] 构建完成 "
@@ -754,10 +846,14 @@ def preview_wechat(
     from inloop.preview import DEFAULT_PORT, PreviewError, find_free_port, serve
 
     try:
-        outcome = build_article(article, config=config)
+        outcome = build_article(article, config=config, content_root=content_root)
     except BuildError as exc:
-        err_console.print(f"[bold red]✗[/bold red] {escape(str(exc))}")
-        raise typer.Exit(code=EXIT_VALIDATION_FAILED) from exc
+        _fail(
+            str(exc),
+            code="build_failed",
+            hint="先运行 `inloop check <slug>` 定位内容问题。",
+        )
+        return
 
     console.print(
         f"[bold green]✓[/bold green] 构建完成 {_relative(outcome.output_dir, config.root)}"
@@ -840,7 +936,7 @@ def index(
 
 @app.command("list")
 def list_articles() -> None:
-    """列出内容目录里的全部文章（任务书 §14）。
+    """列出内容目录里的全部文章（任务书 §7.3）。
 
     这是排查"我到底在读哪个目录"最直接的命令：内容目录可以在四个地方配置，
     列表为空时应当先确认目录对不对，而不是怀疑文章丢了。
@@ -848,6 +944,24 @@ def list_articles() -> None:
     config = _config_or_fail()
     content_root = _content_root_or_fail(config)
     locations = find_articles(content_root)
+    next_id = next_article_id(content_root)
+
+    if _json_output():
+        from inloop import jsonapi
+
+        items: list[dict] = []
+        for location in locations:
+            article = _try_parse(location)
+            if article is None:
+                items.append(
+                    jsonapi.unparsable_to_dict(
+                        location, base=content_root, reason="正文无法解析，请运行 check 查看原因"
+                    )
+                )
+            else:
+                items.append(jsonapi.article_to_dict(article, location, base=content_root))
+        jsonapi.emit(jsonapi.list_payload(items, content_root=content_root, next_id=next_id))
+        return
 
     console.print("[bold]内容目录[/bold]")
     console.print(f"  {content_root}")
@@ -859,7 +973,7 @@ def list_articles() -> None:
         )
         return
 
-    console.print(f"  共 {len(locations)} 篇，下一个编号 {next_article_id(content_root):03d}")
+    console.print(f"  共 {len(locations)} 篇，下一个编号 {next_id:03d}")
     console.print()
     for location in locations:
         article = _try_parse(location)
@@ -890,23 +1004,53 @@ def _try_parse(location: ArticleLocation) -> Article | None:
 @app.command()
 def delete(
     target: str = typer.Argument(..., help="文章目录、index.md 路径或 slug"),
-    yes: bool = typer.Option(False, "--yes", help="跳过确认，直接删除"),
+    yes: bool = typer.Option(
+        False, "--yes", help="跳过确认，直接删除（供脚本与插件使用）"
+    ),
 ) -> None:
-    """删除一篇文章（任务书 §7 内容管理）。
+    """删除一篇文章（任务书 §7.4）。
 
     **破坏性操作。** 内容目录通常不在 Git 里（可能由坚果云之类的同步盘管理），
     删掉的文章没有提交历史可回滚，因此默认会先列出将删除的文件并等待确认。
+
+    ``--json`` 时**必须显式传 ``--yes``**：JSON 模式通常由程序调用，
+    让程序去回答交互提问没有意义，而静默删除又太危险。
     """
+    from inloop import jsonapi
+
     config = _config_or_fail()
     content_root = _content_root_or_fail(config)
 
     try:
         location = resolve_article(content_root, target)
     except ArticleNotFoundError as exc:
-        _fail(str(exc))
+        _fail(str(exc), code="article_not_found")
         return
 
     article = _try_parse(location)
+    files = sorted(p for p in location.directory.rglob("*") if p.is_file())
+    image_count = sum(
+        1 for p in files if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+    )
+
+    if _json_output():
+        # JSON 模式下不接受交互确认：要么 --yes 明确删，要么返回预览并退出
+        if not yes:
+            jsonapi.emit(
+                jsonapi.deletion_preview_payload(
+                    location,
+                    base=content_root,
+                    image_count=image_count,
+                    file_count=len(files),
+                )
+            )
+            err_console.print(
+                "[bold yellow]未传 --yes，未执行删除。[/bold yellow]"
+                "如需删除请加 `--yes`。"
+            )
+            raise typer.Exit(code=EXIT_VALIDATION_FAILED)
+        _do_delete(content_root, location, config, base=content_root)
+        return
 
     # 先展示将要删除什么，再确认：只看目录名不足以判断删的是不是想要的那篇
     console.print("[bold]将要删除[/bold]")
@@ -915,10 +1059,6 @@ def delete(
         console.print(f"  标题：{escape(article.title)}")
         console.print(f"  状态：{article.status}  编号：{article.id:03d}")
 
-    files = sorted(p for p in location.directory.rglob("*") if p.is_file())
-    image_count = sum(
-        1 for p in files if p.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp"}
-    )
     console.print(f"  文件：{len(files)} 个（其中图片 {image_count} 张）")
     for path in files:
         console.print(f"    {path.relative_to(location.directory).as_posix()}")
@@ -949,6 +1089,34 @@ def delete(
     console.print("  提示：索引可能已过期，运行 `inloop index` 更新。")
 
 
+def _do_delete(
+    content_root: Path, location: ArticleLocation, config: Config, *, base: Path
+) -> None:
+    """执行删除并输出结果（JSON 与人类可读两种形式）。
+
+    抽出来是为了让 JSON 路径与人读路径共用同一段删除逻辑——
+    两处各写一遍必然漂移，而这是破坏性操作，不能有第二份实现。
+    """
+    from inloop import jsonapi
+
+    try:
+        result = delete_article(content_root, location)
+    except ArticleDeletionError as exc:
+        _fail(str(exc), code="delete_failed")
+        return
+
+    if _json_output():
+        jsonapi.emit(jsonapi.delete_payload(result, base=base, removed=True))
+        return
+
+    console.print(
+        f"[bold green]✓[/bold green] 已删除 "
+        f"{_display_path(result.location.directory, config, content_root)}"
+        f"（{len(result.files)} 个文件，{_human_size(result.total_bytes)}）"
+    )
+    console.print("  提示：索引可能已过期，运行 `inloop index` 更新。")
+
+
 # --- 共用辅助 -------------------------------------------------------------
 
 
@@ -963,7 +1131,7 @@ def _load_article_or_fail(
     try:
         location = resolve_article(content_root, target)
     except ArticleNotFoundError as exc:
-        _fail(str(exc))
+        _fail(str(exc), code="article_not_found", hint="用 `inloop list` 查看可用文章。")
         raise AssertionError("unreachable") from exc  # pragma: no cover
 
     try:

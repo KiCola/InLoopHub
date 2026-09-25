@@ -274,9 +274,15 @@ def _as_directory(value: Path | str, source: str) -> Path:
     return candidate
 
 
-@lru_cache(maxsize=1)
 def load_config(root: Path | None = None) -> Config:
-    """读取并缓存仓库配置。
+    """读取仓库配置（带缓存）。
+
+    缓存**按实际解析出的仓库根**分别保留。
+
+    为什么不能简单加 ``@lru_cache``：``root=None`` 时实际根来自
+    ``INLOOP_ROOT`` 环境变量，而环境变量不参与缓存键——同一个进程里
+    改了环境变量仍会拿到旧配置。测试与多仓库场景都会踩到。
+    因此这里显式以解析后的根作为缓存键。
 
     Args:
         root: 仓库根目录；为 None 时自动定位。
@@ -287,11 +293,22 @@ def load_config(root: Path | None = None) -> Config:
     Raises:
         ConfigError: 目录或配置内容不合法。
     """
-    resolved_root = root or repo_root()
+    return _load_config_cached(root or repo_root())
+
+
+@lru_cache(maxsize=8)
+def _load_config_cached(resolved_root: Path) -> Config:
+    """按仓库根缓存的实现细节。"""
     config_dir = resolved_root / CONFIG_DIR_NAME
 
     site_doc = _read_yaml(config_dir / SITE_CONFIG_NAME)
     wechat_doc = _read_yaml(config_dir / WECHAT_CONFIG_NAME)
+
+    # 顺序很重要：**先取出 content 段再删键**。
+    # 反过来写（先 pop 再读）会永远读到空映射——配置里填了内容目录也不生效，
+    # 而且静默回退到 <repo>/articles，退出码仍是 0，用户无从判断原因。
+    # 这个 bug 真的写出来过，由独立审核发现。
+    content_section = _optional_mapping(site_doc, "content")
     site_doc.pop("content", None)  # content 是顶层段，不属于 site
 
     return Config(
@@ -299,7 +316,7 @@ def load_config(root: Path | None = None) -> Config:
         site=_require_mapping(site_doc, "site", config_dir / SITE_CONFIG_NAME),
         brand=_require_mapping(site_doc, "brand", config_dir / SITE_CONFIG_NAME),
         wechat=_require_mapping(wechat_doc, "wechat", config_dir / WECHAT_CONFIG_NAME),
-        content=_optional_mapping(site_doc, "content"),
+        content=content_section,
     )
 
 
