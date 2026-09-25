@@ -1,3 +1,8 @@
+<!-- name: paper-note -->
+<!-- description: 论文拆解：问题、动机、方法、架构、实验、局限与我的判断 -->
+<!-- category: paper -->
+<!-- default_status: draft -->
+
 ---
 id: {{id}}
 title: "{{title}}"
@@ -5,14 +10,14 @@ slug: "{{slug}}"
 date: {{date}}
 author: "{{author}}"
 category: "paper"
-status: "draft"
+status: "{{status}}"
 
 tags:
-  - {{tag}}
+{{tags}}
 
 summary: "{{summary}}"
 
-cover: "cover.png"
+cover: "{{cover}}"
 
 platforms:
   wechat: true

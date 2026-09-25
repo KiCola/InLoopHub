@@ -1,3 +1,8 @@
+<!-- name: diary -->
+<!-- description: 科研生活：偏个人内容，模板最轻，可直接删掉重写 -->
+<!-- category: diary -->
+<!-- default_status: draft -->
+
 ---
 id: {{id}}
 title: "{{title}}"
@@ -5,14 +10,14 @@ slug: "{{slug}}"
 date: {{date}}
 author: "{{author}}"
 category: "diary"
-status: "draft"
+status: "{{status}}"
 
 tags:
-  - {{tag}}
+{{tags}}
 
 summary: "{{summary}}"
 
-cover: "cover.png"
+cover: "{{cover}}"
 
 platforms:
   wechat: true

@@ -1,3 +1,8 @@
+<!-- name: build-log -->
+<!-- description: 实验日志：目标、环境、基线、尝试、失败、调试、结果与教训 -->
+<!-- category: build -->
+<!-- default_status: draft -->
+
 ---
 id: {{id}}
 title: "{{title}}"
@@ -5,14 +10,14 @@ slug: "{{slug}}"
 date: {{date}}
 author: "{{author}}"
 category: "build"
-status: "draft"
+status: "{{status}}"
 
 tags:
-  - {{tag}}
+{{tags}}
 
 summary: "{{summary}}"
 
-cover: "cover.png"
+cover: "{{cover}}"
 
 platforms:
   wechat: true

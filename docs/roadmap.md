@@ -11,13 +11,15 @@
 | 1 | 仓库初始化 | 完成 |
 | 2 | Markdown 规范 | 部分：front matter 规范按任务书 §4 落实为可校验规则；正文格式约定待渲染环节落地 |
 | 3 | Front Matter Parser | 完成 |
-| 4 | Article Model | 完成 |
-| 5 | `inloop new` | 待办 |
-| 6 | `inloop check` | 待办 |
+| 4 | Article Model | 完成（含序列化、规则码集中表） |
+| 5 | `inloop new` | 完成（模板系统一并落地） |
+| 6 | `inloop check` | 完成 |
 | 7 | Markdown → HTML | 待办 |
 | 8 | 微信 inline CSS | 待办 |
 | 9 | 图片处理 | 待办 |
 | 10 | preview HTML | 待办 |
+
+已超出 P0 清单但顺手完成的小项：`inloop status`（任务书 §17）、`inloop rules`（规则码自查）。
 
 ## 第二阶段（P1）—— 让系统变得完整
 

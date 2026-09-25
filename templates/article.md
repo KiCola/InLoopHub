@@ -1,3 +1,8 @@
+<!-- name: article -->
+<!-- description: 通用文章：背景、正文、分析、我的理解、参考资料 -->
+<!-- category: diary -->
+<!-- default_status: draft -->
+
 ---
 id: {{id}}
 title: "{{title}}"
@@ -5,14 +10,14 @@ slug: "{{slug}}"
 date: {{date}}
 author: "{{author}}"
 category: "{{category}}"
-status: "draft"
+status: "{{status}}"
 
 tags:
-  - {{tag}}
+{{tags}}
 
 summary: "{{summary}}"
 
-cover: "cover.png"
+cover: "{{cover}}"
 
 platforms:
   wechat: true
