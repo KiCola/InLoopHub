@@ -62,6 +62,35 @@ vault 里也不会多出 `node_modules` 之类的构建中间物（如果你把 
 **如果工具仓库和 vault 在不同的盘**（例如 vault 在 C、工具在 E），
 前三条之外无法自动发现，必须由人告诉一次——这不是缺陷，是路径的现实。
 
+### 内容目录在 vault 之外？用联接接进来
+
+内容与工具解耦之后，文章常在 vault **之外**（另一个盘、另一个目录）。
+这样 Obsidian **打不开**它们——它只认 vault 内的文件。
+
+**解法：用目录联接把内容目录挂进 vault。** 文件实际仍在原处，不是拷贝：
+
+```bash
+cd plugin
+npm run link-content -- --content "E:/InLoopHub/content"
+```
+
+它会在 vault 里建一个 `InLoopContent/` 指向内容目录，然后：
+
+1. 把插件的「内容目录」设为 **vault 内那个路径**
+   （脚本会把完整路径打印出来，直接复制）
+2. 在 Obsidian 里刷新文件树或重启
+
+之后文章就像普通笔记一样：文件树能看到、能点开编辑、**实时预览照常工作**。
+
+> **实测确认 Obsidian 会索引联接里的文件**：`workspace.json` 的 `lastOpenFiles`
+> 里出现过 `InLoopContent/2026/001-.../index.md`，即用户确实在 Obsidian 里
+> 打开过它们。
+>
+> 为什么用联接而不是拷贝：不占双份空间，也不会让同步盘同步一份工具仓库的内容。
+> 删掉联接不会删文章。
+
+移除联接：`npm run link-content -- --remove`。
+
 ### `inloop-path.txt`：让这次告知只做一次
 
 点「记住到 vault」会在 **vault 根目录**写入 `inloop-path.txt`：

@@ -12,7 +12,8 @@
     "unit": "node scripts/unit.mjs",
     "check": "npm run typecheck && npm run build && npm run smoke && npm run unit",
     "install-to-vault": "node scripts/link-vault.mjs",
-    "unlink-vault": "node scripts/link-vault.mjs --remove"
+    "unlink-vault": "node scripts/link-vault.mjs --remove",
+    "link-content": "node scripts/link-content.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

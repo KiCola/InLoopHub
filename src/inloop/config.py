@@ -269,8 +269,20 @@ class Config:
 
 
 def _as_directory(value: Path | str, source: str) -> Path:
-    """把取值解析为已存在的目录路径；不存在时给出可定位的错误。"""
-    candidate = Path(value).expanduser().resolve()
+    """把取值解析为已存在的目录路径；不存在时给出可定位的错误。
+
+    **绝对路径不做 realpath 解析**（`Path.resolve()` 会跟随符号链接/目录联接）。
+    原因很实际：内容目录常被"接"进编辑器的工作区——例如用目录联接把
+    `E:/InLoopHub/content` 挂成 vault 里的 `InLoopContent/`。若这里把联接解引用，
+    返回的路径就变成了 vault **之外**的真实路径，调用方（Obsidian 插件）
+    据此会判定"这篇不在 vault 内"，于是明明能在编辑器里打开的文章也打不开。
+
+    相对路径仍然要 resolve：那是相对于当前工作目录的，必须换成绝对路径才能用。
+    """
+    raw = Path(value).expanduser()
+    # 已经是绝对路径就原样保留（只做一次 normpath 清理 `.` 与重复分隔符），
+    # 否则按相对路径解析成绝对路径。
+    candidate = Path(os.path.normpath(raw)) if raw.is_absolute() else raw.resolve()
     if not candidate.is_dir():
         raise ConfigError(
             f"内容目录不存在：{candidate}\n"

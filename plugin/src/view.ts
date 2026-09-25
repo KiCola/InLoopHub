@@ -278,7 +278,7 @@ export class InloopPreviewView extends ItemView {
     const absolute = `${contentRoot}/${article.path}`;
     const vaultPath = toVaultPath(this.app, absolute);
     if (!vaultPath) {
-      new Notice(`这篇不在当前 vault 内，请手动打开：${absolute}`);
+      this.noticeOutOfVault(absolute);
       return;
     }
     const file = this.app.vault.getAbstractFileByPath(vaultPath);
@@ -464,7 +464,11 @@ export class InloopPreviewView extends ItemView {
    *
    * CLI 给的是**相对内容目录**的路径，而 Obsidian 的 `getAbstractFileByPath`
    * 要的是**vault 内**相对路径——两者只有在内容目录恰好是 vault 根时才相同。
-   * 因此先拼成绝对路径，再转成 vault 路径；不在 vault 内时给出可手动打开的完整路径。
+   * 因此先拼成绝对路径，再转成 vault 路径。
+   *
+   * 内容目录在 vault **之外**时（完全合法：可以放在另一个盘），
+   * Obsidian 打不开它。这时给出**可操作**的指引，而不是一句"请手动打开"——
+   * 最实用的做法是用目录联接把内容目录接进 vault（见 plugin/README.md）。
    */
   private async openCreated(contentRoot: string, relativePath: string): Promise<void> {
     const base = (contentRoot || "").replace(/\\/g, "/").replace(/\/+$/, "");
@@ -472,9 +476,7 @@ export class InloopPreviewView extends ItemView {
     const vaultPath = toVaultPath(this.app, absolute);
 
     if (!vaultPath) {
-      // 文章建在 vault 之外（完全合法：内容目录可以任意指定），
-      // 这时没法在 Obsidian 里打开，只能告诉用户文件在哪。
-      new Notice(`已创建，但不在当前 vault 内，请手动打开：\n${absolute}`, 12000);
+      this.noticeOutOfVault(absolute);
       return;
     }
 
@@ -491,6 +493,23 @@ export class InloopPreviewView extends ItemView {
       return;
     }
     new Notice(`已创建，但没能在 vault 里定位到：${vaultPath}`, 10000);
+  }
+
+  /**
+   * 内容目录在 vault 之外时的提示。
+   *
+   * 关键是把**怎么改**说清楚：用目录联接把内容目录接进 vault，
+   * 文章就会像普通笔记一样可以点开编辑。只说"请手动打开"等于把问题推给用户。
+   */
+  private noticeOutOfVault(absolute: string): void {
+    const contentRoot = (this.plugin.cliOptions().contentRoot ?? "").replace(/\\/g, "/");
+    new Notice(
+      `已创建，但内容目录在 vault 之外，Obsidian 打不开它：\n${absolute}\n\n` +
+        `想让文章能在这里直接编辑，用目录联接把它接进 vault：\n` +
+        `  cd plugin\n  npm run link-content -- --content "${contentRoot}"\n` +
+        `然后把设置里的「内容目录」改成 vault 内那个路径。`,
+      20000,
+    );
   }
 
   // --- 删除 ---------------------------------------------------------------
