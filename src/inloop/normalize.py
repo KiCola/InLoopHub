@@ -268,6 +268,12 @@ FORBIDDEN_TAGS: frozenset[str] = frozenset(
 )
 
 
+#: 允许保留 `class` 的少数情况：代码块的语言标记。
+#: 它不是样式，而是**语义信息**——渲染层要靠它选择语法着色器。
+#: 保留到渲染层用完为止，最终产物里仍会被清除。
+_LANGUAGE_CLASS_PREFIX = "language-"
+
+
 def _strip_identifiers(soup: BeautifulSoup) -> None:
     """删除 ``id`` / ``class`` 与不在白名单内的属性。
 
@@ -276,19 +282,42 @@ def _strip_identifiers(soup: BeautifulSoup) -> None:
 
     ``style`` 被**保留**：规范化阶段写入的是结构样式（缩进、等宽、上标），
     微信渲染层随后会在此基础上叠加配色与字号。两个阶段写入的属性不重叠。
+
+    唯一的例外是 ``<code class="language-xxx">``：语言标记是语义而非样式，
+    渲染层需要它来选语法着色器，因此在渲染完成前保留。
     """
     for tag in soup.find_all(True):
         allowed = _ALLOWED_ATTRIBUTES.get(tag.name, set())
         kept: dict[str, str] = {}
+
         style = tag.attrs.get("style")
         if isinstance(style, str) and style.strip():
             kept["style"] = style.strip()
+
+        if tag.name == "code":
+            language_class = _language_class_of(tag)
+            if language_class:
+                kept["class"] = language_class
+
         for name, value in tag.attrs.items():
             if name in ("style", "id", "class"):
                 continue
             if name in allowed:
                 kept[name] = " ".join(value) if isinstance(value, list) else str(value)
         tag.attrs = kept
+
+
+def _language_class_of(tag: Tag) -> str:
+    """取出 ``language-xxx`` 形式的 class（若有）。"""
+    classes = tag.get("class")
+    if isinstance(classes, str):
+        classes = classes.split()
+    if not isinstance(classes, list):
+        return ""
+    for name in classes:
+        if isinstance(name, str) and name.startswith(_LANGUAGE_CLASS_PREFIX):
+            return name
+    return ""
 
 
 def sanitize_allowed_tags(soup: BeautifulSoup) -> list[str]:

@@ -132,12 +132,32 @@
   margin: 24px auto;
 }
 
-/* 图片说明文字：由构建脚本按 alt 自动生成（任务书 §10） */
-.inloop-article .inloop-caption {
-  margin: -12px 0 24px 0;
-  text-align: center;
+/* 图片说明文字的样式放在文件末尾，见下方 "图注" 一节。
+   放在这里会被后面的通用 `p` 规则覆盖。 */
+
+/* 脚注降级区（结构由 normalize 阶段改写，样式在此统一） */
+.inloop-article section {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid var(--brand-border);
+}
+
+.inloop-article section p {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--brand-secondary-text);
+}
+
+.inloop-article section ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.inloop-article section li {
+  margin-bottom: 6px;
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.7;
   color: var(--brand-secondary-text);
 }
 
@@ -207,8 +227,40 @@
   border-top: 1px solid var(--brand-border);
 }
 
+/* 删除线：低饱和灰，弱化而不是抹掉 */
+.inloop-article s,
+.inloop-article del {
+  color: var(--brand-secondary-text);
+}
+
+/* 上标：用于脚注引用（normalize 阶段已去除锚点链接） */
+.inloop-article sup {
+  font-size: 12px;
+  line-height: 0;
+  vertical-align: super;
+  color: var(--brand-secondary-text);
+}
+
 /* 加粗：只加粗，不用颜色，保持克制 */
 .inloop-article strong {
   font-weight: 700;
   color: var(--brand-text);
+}
+
+/* ==========================================================================
+   图注（caption）
+   ==========================================================================
+   由构建脚本按图片的 title（无则 alt）自动生成（任务书 §10）。
+
+   放在文件**最末尾**是有意为之：层叠只由文件顺序决定，通用规则（p、section p）
+   都在上方。若把本规则写在前面，13px 会被后面 p 的 16px 覆盖——
+   这个坑在开发中真实发生过，故以位置保证其优先级。
+   ========================================================================== */
+
+.inloop-article .inloop-caption {
+  margin: -12px 0 24px 0;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--brand-secondary-text);
 }
