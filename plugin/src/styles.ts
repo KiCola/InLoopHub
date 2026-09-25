@@ -13,9 +13,25 @@
 const STYLE_ID = "inloop-notes-styles";
 
 const CSS = `
+/* 面板整体用纵向布局，让预览区能占据剩余高度而不是被列表挤出去 */
 .inloop-panel {
   padding: 8px 10px 20px 10px;
   font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+}
+
+/*
+ * 文章列表限高并独立滚动。
+ * 不这么做时，文章一多就会把下面的预览区推出可视范围——
+ * 用户看到的是"面板里没有预览"，会以为功能不存在。
+ */
+.inloop-list-wrap {
+  max-height: 32vh;
+  overflow-y: auto;
+  flex: 0 0 auto;
 }
 
 .inloop-toolbar {
@@ -147,8 +163,8 @@ const CSS = `
 .inloop-frame {
   display: block;
   width: 100%;
-  height: 60vh;
-  min-height: 320px;
+  height: 46vh;
+  min-height: 260px;
   border: none;
   background: #fff;
 }

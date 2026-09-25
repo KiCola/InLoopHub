@@ -34,7 +34,7 @@ import {
 } from "./settings";
 import { VIEW_TYPE_INLOOP_PREVIEW, InloopPreviewView } from "./view";
 import { installStyles } from "./styles";
-import { openWithSystem, copyRichText, vaultBasePath } from "./obsidian-env";
+import { openWithSystem, copyRichText, readTextFile, vaultBasePath } from "./obsidian-env";
 
 export default class InloopPlugin extends Plugin {
   settings: InloopSettings = { ...DEFAULT_SETTINGS };
@@ -264,13 +264,7 @@ export default class InloopPlugin extends Plugin {
       const result = await buildArticle(this.cliOptions(), slug);
       this.lastBuild = result;
 
-      const html = await this.readFileText(result.html_path);
-      if (html === null) {
-        notice.hide();
-        new Notice(`构建成功，但读不到产物：${result.html_path}`);
-        return;
-      }
-
+      const html = readTextFile(result.html_path);
       const body = extractBody(html);
       // 必须同时写入 HTML flavor：微信编辑器靠 text/html 取得内联样式，
       // 只用 writeText（纯文本）粘过去会丢掉全部排版。
@@ -310,15 +304,6 @@ export default class InloopPlugin extends Plugin {
     // 交给系统默认程序打开：去公众号粘贴是一段浏览器里的操作，
     // 在 Obsidian 内嵌预览反而不方便。
     await openWithSystem(path);
-  }
-
-  private async readFileText(path: string): Promise<string | null> {
-    try {
-      const { readFile } = await import("node:fs/promises");
-      return await readFile(path, "utf8");
-    } catch {
-      return null;
-    }
   }
 
   // --- 供视图使用的小工具 -------------------------------------------------

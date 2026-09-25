@@ -52,6 +52,50 @@ export async function openWithSystem(path: string): Promise<void> {
   await electron.shell.openPath(path);
 }
 
+/**
+ * 读一个文本文件；失败时**抛出带原因的异常**。
+ *
+ * 为什么不返回 `null` 表示失败：那样调用方只能说"读不到产物"，
+ * 而**看不到为什么**——是文件不存在、路径不对、还是权限不够。
+ * 这个诊断信息缺失让一个真实的 bug 排查了很久（AGENTS.md §4：不静默失败、
+ * 错误信息要说清「哪里错了 + 为什么 + 怎么改」）。
+ *
+ * 用 `require("node:fs")` 而不是 `await import(...)`：本插件的产物是
+ * CommonJS 包，`require` 是已验证可用的路径（`require("electron")` 同理）。
+ */
+export function readTextFile(path: string): string {
+  const fs = require("node:fs") as {
+    readFileSync?: (target: string, encoding: string) => string;
+    existsSync?: (target: string) => boolean;
+  };
+
+  if (typeof fs.readFileSync !== "function") {
+    throw new Error(
+      "当前环境拿不到 Node 的文件读取能力（require('node:fs') 不可用）。\n" +
+        "这属于插件与宿主环境不兼容，请反馈这条信息。",
+    );
+  }
+
+  if (fs.existsSync && !fs.existsSync(path)) {
+    throw new Error(
+      `文件不存在：${path}\n` +
+        "可能是构建没有真正产出，或两次构建之间文件被清理了。\n" +
+        "修正方法：先单独点一次「构建并复制」，看是否报错。",
+    );
+  }
+
+  try {
+    return fs.readFileSync(path, "utf8");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `读取文件失败：${path}\n原因：${detail}\n` +
+        "若提示权限不足，检查该目录是否被同步盘客户端锁定。",
+    );
+  }
+}
+
+
 /** 剪贴板写入的结果，用于告诉用户"样式到底写进去了没有" */
 export interface ClipboardOutcome {
   /** 是否写入了 HTML flavor（微信排版靠它） */

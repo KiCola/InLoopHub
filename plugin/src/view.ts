@@ -9,7 +9,7 @@ import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type InloopPlugin from "./main";
 import type { ArticleSummary, BuildResult, ImageEntry } from "./inloop/cli";
 import { STATUSES } from "./inloop/cli";
-import { toVaultPath } from "./obsidian-env";
+import { readTextFile, toVaultPath } from "./obsidian-env";
 import {
   FRAME_SANDBOX,
   extractBodyHtml,
@@ -119,9 +119,14 @@ export class InloopPreviewView extends ItemView {
     };
 
     this.statusEl = root.createDiv({ cls: "inloop-status" });
+
+    // 文章列表放进固定最大高度的滚动容器。
+    // 为什么需要：文章一多，列表会把下面的预览区推出可视范围，
+    // 表现为"面板里根本看不到预览"——用户会以为功能不存在。
     this.formEl = root.createDiv({ cls: "inloop-form" });
     this.formEl.hide();
-    this.articlesEl = root.createDiv({ cls: "inloop-articles" });
+    const listWrap = root.createDiv({ cls: "inloop-list-wrap" });
+    this.articlesEl = listWrap.createDiv({ cls: "inloop-articles" });
 
     root.createDiv({ cls: "inloop-sep" });
 
@@ -324,12 +329,10 @@ export class InloopPreviewView extends ItemView {
     try {
       const build = await this.plugin.runRaw(["build-wechat", slug]);
       const result = build as unknown as BuildResult;
-      const html = await this.readText(result.html_path);
+      // 读失败时让异常带着**真实原因**抛出来，不要返回 null 后只说"读不到"——
+      // 那样调用方无从判断是文件不存在、路径不对还是权限不足。
+      const html = readTextFile(result.html_path);
       busy.remove();
-      if (html === null) {
-        host.createDiv({ cls: "inloop-error", text: `读不到产物：${result.html_path}` });
-        return;
-      }
       const body = extractBodyHtml(html);
       const frame = host.createEl("iframe", { cls: "inloop-frame" });
       // sandbox 不能为空：空 sandbox 会阻止一切 file:// 加载，图片全成坏图。
@@ -368,15 +371,6 @@ export class InloopPreviewView extends ItemView {
       const line = host.createDiv({ cls: "inloop-image-line" });
       const where = image.section ? `「${image.section}」一节内` : "正文开头处";
       line.setText(`第 ${image.order} 张  ${image.output}  → ${where}`);
-    }
-  }
-
-  private async readText(path: string): Promise<string | null> {
-    try {
-      const { readFile } = await import("node:fs/promises");
-      return await readFile(path, "utf8");
-    } catch {
-      return null;
     }
   }
 
