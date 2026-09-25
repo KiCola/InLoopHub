@@ -83,6 +83,11 @@ IMG_TOO_LARGE_ERROR = Rule("IMG005", IssueLevel.ERROR, "图片超过体积上限
 IMG_MISSING_ALT = Rule("IMG101", IssueLevel.WARNING, "正文图片缺少有意义的 alt")
 IMG_TOO_LARGE_WARNING = Rule("IMG102", IssueLevel.WARNING, "图片体积偏大")
 IMG_MISSING_CAPTION = Rule("IMG103", IssueLevel.WARNING, "图片缺少 title（caption）")
+IMG_EXTERNAL = Rule(
+    "IMG104",
+    IssueLevel.WARNING,
+    "正文引用了外链图片，微信编辑器不会抓取，粘贴后图片会丢失",
+)
 
 # --- Markdown（任务书 §5）------------------------------------------------
 
@@ -126,6 +131,7 @@ ALL_RULES: tuple[Rule, ...] = tuple(
             IMG_MISSING_ALT,
             IMG_TOO_LARGE_WARNING,
             IMG_MISSING_CAPTION,
+            IMG_EXTERNAL,
             MD_PARSE_FAILED,
             MD_RAW_FOOTNOTE,
             MD_TABLE_RAGGED,

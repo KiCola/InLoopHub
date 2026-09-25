@@ -22,6 +22,7 @@ from inloop.normalize import ExtractedImage
 from inloop.rules import (
     IMG_ABSOLUTE_PATH,
     IMG_COVER_MISSING,
+    IMG_EXTERNAL,
     IMG_MISSING,
     IMG_MISSING_ALT,
     IMG_MISSING_CAPTION,
@@ -51,6 +52,9 @@ class ImageAsset:
         alt: 替代文字。
         title: 图片说明。
         from_markdown: 来自正文（True）还是封面等元数据（False）。
+        section: 该图所属的最近一个上级标题文本；供人工插图时定位。
+        byte_size: 文件字节数，写入清单供发布前判断体积。
+        width / height: 像素尺寸；解析不出时为 0。
     """
 
     source_path: Path
@@ -58,6 +62,10 @@ class ImageAsset:
     alt: str = ""
     title: str = ""
     from_markdown: bool = True
+    section: str = ""
+    byte_size: int = 0
+    width: int = 0
+    height: int = 0
 
     @property
     def html_src(self) -> str:
@@ -122,7 +130,15 @@ def prepare_images(
 
     for image in images:
         if not image.is_local:
-            # 外部图片不复制，也不改写：微信编辑器会自行处理外链图片
+            # 外部图片不复制、不改写，但**必须告警**：实测微信公众号编辑器
+            # 不会抓取外链图片，粘贴后只显示成一串文字，图片等于丢失。
+            # 曾经这里写着"编辑器会自行处理外链图片"——那是错的，已按实测更正。
+            result.warnings.append(
+                f"{_rel(article_dir)} {IMG_EXTERNAL.code} [{IMG_EXTERNAL.level.value}] "
+                f"正文引用了外链图片：`{image.src}`。"
+                f"微信编辑器不会抓取外链图片，粘贴后只显示为文字。"
+                f"修正方法：把图片下载到文章目录的 `assets/` 下，改用相对路径引用。"
+            )
             continue
 
         absolute_issue = _check_absolute(image.src, article_dir)
@@ -153,12 +169,17 @@ def prepare_images(
         destination = images_dir / output_name
         _copy(source, destination)
 
+        size = image_size(destination)
         asset = ImageAsset(
             source_path=source,
             output_relative=Path(IMAGES_DIR_NAME) / output_name,
             alt=image.alt,
             title=image.title,
             from_markdown=True,
+            section=image.section,
+            byte_size=destination.stat().st_size,
+            width=size[0] if size else 0,
+            height=size[1] if size else 0,
         )
         copied[source] = asset
         result.assets.append(asset)
@@ -282,6 +303,7 @@ def _prepare_cover(
 
     destination = output_dir / source.name
     _copy(source, destination)
+    size = image_size(destination)
     result.assets.append(
         ImageAsset(
             source_path=source,
@@ -289,6 +311,9 @@ def _prepare_cover(
             alt="封面",
             title="",
             from_markdown=False,
+            byte_size=destination.stat().st_size,
+            width=size[0] if size else 0,
+            height=size[1] if size else 0,
         )
     )
 

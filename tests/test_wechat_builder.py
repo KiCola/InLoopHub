@@ -96,10 +96,15 @@ def test_真实文章产物中的图片都存在(index: Path) -> None:
     metadata = json.loads((outcome.output_dir / METADATA_JSON).read_text(encoding="utf-8"))
 
     assert metadata["images"], "文章应当至少包含一张图片"
-    for relative in metadata["images"]:
-        target = outcome.output_dir / relative
-        assert target.is_file(), relative
+    for entry in metadata["images"]:
+        assert isinstance(entry, dict), "图片清单必须是结构化对象，便于将来回填地址"
+        target = outcome.output_dir / entry["output"]
+        assert target.is_file(), entry["output"]
         assert target.stat().st_size > 0
+        # 清单里的体积必须与实际文件一致，否则按清单判断"是否过大"就是错的
+        assert entry["byte_size"] == target.stat().st_size
+        assert entry["kind"] in {"body", "cover"}
+        assert entry["order"] >= 1
 
 
 @pytest.mark.parametrize("index", REAL_ARTICLES, ids=lambda p: p.parent.name)

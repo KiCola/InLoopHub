@@ -1063,7 +1063,10 @@ def _apply_code_highlighting(soup: BeautifulSoup) -> None:
         code = block.find("code")
         if code is None:
             continue
-        text = code.get_text()
+        # 取文本时必须把哨兵还原成空格后再交给词法器：
+        # 上一轮处理留下的哨兵不是空白字符，词法器会认不出这是代码，
+        # 结果是整段退化成纯文本、既没有着色也没有正确的分词。
+        text = _restore_code_spaces(code.get_text())
         if not text.strip():
             continue
 
@@ -1076,11 +1079,14 @@ def _apply_code_highlighting(soup: BeautifulSoup) -> None:
                 lexer = TextLexer()
 
         html = _tokens_to_html(lex(text, lexer), style)
-        # 交给解析器前把空格换成哨兵：解析器会折叠连续空格，而缩进就是连续空格。
-        # HTML 由我们自己生成、结构完全可预期，因此哨兵不会与真实内容冲突。
-        fragment = BeautifulSoup(_protect_code_spaces(html), "html.parser")
+        # 这里传入的 HTML 只在**文本内容**里含哨兵，属性值里没有空格需要保护，
+        # 因此解析器不会折叠缩进。
+        fragment = BeautifulSoup(html, "html.parser")
         code.clear()
-        for child in fragment.children:
+        # 必须先用 list() 固化子节点再遍历：children 是惰性迭代器，
+        # 而 append 会把节点从 fragment 中**摘除**，边遍历边摘除会让迭代器错位——
+        # 表现为隔一个取一个，恰好把所有空格与换行的 span 全丢掉。
+        for child in list(fragment.children):
             code.append(child)
 
 
@@ -1115,6 +1121,10 @@ def _tokens_to_html(tokens: object, style: object) -> str:
             declarations.append("text-decoration:underline")
 
         escaped = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        # 只替换**文本内容**里的空格：属性值里的空格必须原样保留，
+        # 否则 `white-space:pre` 会变成 `white-space␀pre`，样式失效、
+        # 还会让 BeautifulSoup 解析出错误的标签名。
+        escaped = escaped.replace(" ", _CODE_SPACE_SENTINEL)
 
         if not declarations:
             # 无配色的 token 也要套 span：解析器会折叠**元素之间**的连续空白，
@@ -1127,25 +1137,21 @@ def _tokens_to_html(tokens: object, style: object) -> str:
     return "".join(parts)
 
 
-#: 代码块中空白的临时替身。
+#: 代码块中空格在 HTML 里的临时替身。
 #:
 #: 为什么需要它：BeautifulSoup 的 ``html.parser`` 会在解析阶段
 #: **把元素内部的连续空格折叠成一个**（换行不受影响）。代码的缩进恰恰是
 #: 连续空格，于是 `from dataclasses import` 变成 `from dataclassesimport`、
 #: 函数体缩进整段消失——代码直接变成语法错误。
 #:
-#: 解法：把空格换成私有使用区字符后再交给解析器（解析器不认识它，不会折叠），
-#: 最终序列化完成后一次性还原。换行不必替换，它本身不会被折叠。
+#: 做法：生成 HTML 时**只把文本内容里的空格**换成这个私有使用区字符
+#: （属性值里的空格不动，例如 `white-space:pre` 必须保持原样），
+#: 解析器不认识哨兵因而不会折叠，最后在产物字符串上一次性换回空格。
 _CODE_SPACE_SENTINEL = "\ue000"
 
 
-def _protect_code_spaces(html: str) -> str:
-    """把空格换成哨兵，避免被 HTML 解析器折叠。"""
-    return html.replace(" ", _CODE_SPACE_SENTINEL)
-
-
 def _restore_code_spaces(text: str) -> str:
-    """把哨兵换回空格。"""
+    """把代码块文本里的哨兵换回空格。"""
     return text.replace(_CODE_SPACE_SENTINEL, " ")
 
 

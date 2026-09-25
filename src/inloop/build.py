@@ -183,7 +183,7 @@ def build_article(
     metadata = build_metadata(
         article,
         repo_root=repo_root,
-        image_paths=_image_relative_paths(assets),
+        image_manifest=build_image_manifest(assets, repo_root=repo_root),
         render_options=render_options,
     )
 
@@ -223,13 +223,15 @@ def build_metadata(
     article: Article,
     *,
     repo_root: Path,
-    image_paths: list[str],
+    image_manifest: list[dict[str, object]],
     render_options: RenderOptions,
 ) -> dict[str, object]:
     """构造 ``metadata.json`` 的内容（任务书 §12）。
 
     键序固定：便于 diff，也便于将来自动化接口按稳定结构读取。
     ``render_options`` 记录本次生效的排版选项，使观感可复现。
+    ``images`` 是结构化清单（序号、产物路径、源路径、体积、尺寸、所属节、图注），
+    既是将来上传换地址的依据，也是人工插图时的顺序表。
     """
     source = article.source
     # 用绝对路径比较：article.source 可能是相对路径（取决于调用方怎么构造 Article），
@@ -253,7 +255,7 @@ def build_metadata(
         "slug": article.directory_name,
         "category": str(article.category),
         "tags": list(article.tags),
-        "images": image_paths,
+        "images": image_manifest,
         "byline": article.byline,
         "byline_note": article.byline_note,
         "render_options": render_options.as_metadata(),
@@ -280,9 +282,40 @@ def _generated_at() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def _image_relative_paths(assets: AssetResult) -> list[str]:
-    """取出产物中图片的相对路径，按处理顺序。"""
-    return [asset.output_relative.as_posix() for asset in assets.assets]
+def build_image_manifest(assets: AssetResult, *, repo_root: Path) -> list[dict[str, object]]:
+    """构造图片清单（AGENTS.md §11 第 2 条要求的结构化清单）。
+
+    图片必须以**独立文件 + 结构化清单**进入产物，供将来上传到平台换取地址后
+    回填正文；同时这份清单也是人在微信编辑器里逐张插图时的依据——
+    只给文件名，人无法判断该插在哪一节之后。
+
+    清单里的路径一律相对仓库根，不写绝对路径（AGENTS.md §4）。
+    """
+    manifest: list[dict[str, object]] = []
+    for index, asset in enumerate(assets.assets, start=1):
+        try:
+            source_reference = asset.source_path.resolve().relative_to(
+                repo_root.resolve()
+            ).as_posix()
+        except ValueError:
+            # 不在仓库内：保留原样总比崩掉好
+            source_reference = asset.source_path.as_posix()
+
+        manifest.append(
+            {
+                "order": index,
+                "kind": "cover" if not asset.from_markdown else "body",
+                "output": asset.output_relative.as_posix(),
+                "source": source_reference,
+                "byte_size": asset.byte_size,
+                "width": asset.width,
+                "height": asset.height,
+                "section": asset.section,
+                "alt": asset.alt,
+                "caption": asset.title,
+            }
+        )
+    return manifest
 
 
 # --- HTML 文档 ------------------------------------------------------------

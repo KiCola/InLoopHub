@@ -57,12 +57,16 @@ class ExtractedImage:
         alt: 替代文字；缺失时为空字符串。
         title: 可选的图片说明。
         is_local: 是否为本地相对路径（外部图片不参与素材复制）。
+        section: 该图片所在的最近一个上级标题文本；没有标题时为空串。
+            供人工在编辑器里插图时定位——产物里的图片必须在编辑器里手动上传，
+            仅凭文件名很难判断该放在哪一节之后。
     """
 
     src: str
     alt: str
     title: str
     is_local: bool
+    section: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,25 +268,40 @@ def _is_local_src(src: str) -> bool:
     return True
 
 
+#: 会被当作"分节标题"的标签。图片的所属节由它决定。
+_SECTION_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
+
+
 def _extract_images(soup: BeautifulSoup) -> tuple[ExtractedImage, ...]:
     """抽取图片信息。
 
     ``src`` 保持原样：实际路径改写由调用方依据素材清单统一完成，
     避免同一件事在两个地方各做一半。
+
+    同时记录每张图所属的**章节标题**：产物里的图片要在微信编辑器里手动上传，
+    只给一个文件名，人无法判断该插在哪一节之后。
     """
     images: list[ExtractedImage] = []
-    for image in soup.find_all("img"):
-        src = image.get("src")
+    current_section = ""
+    for element in soup.find_all(True):
+        if element.name in _SECTION_TAGS:
+            current_section = element.get_text(strip=True)
+            continue
+        if element.name != "img":
+            continue
+
+        src = element.get("src")
         if not isinstance(src, str) or not src.strip():
             continue
-        alt = image.get("alt")
-        title = image.get("title")
+        alt = element.get("alt")
+        title = element.get("title")
         images.append(
             ExtractedImage(
                 src=src.strip(),
                 alt=alt.strip() if isinstance(alt, str) else "",
                 title=title.strip() if isinstance(title, str) else "",
                 is_local=_is_local_src(src),
+                section=current_section,
             )
         )
     return tuple(images)

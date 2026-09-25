@@ -510,7 +510,53 @@ def build_wechat(
         size = full.stat().st_size if full.exists() else 0
         console.print(f"  {relative.as_posix():28s} {_human_size(size)}")
 
+    _print_publish_checklist(outcome.metadata, config.root)
     _print_warnings(outcome.warnings)
+
+
+def _print_publish_checklist(metadata: dict[str, object], root: Path) -> None:
+    """打印"照这个顺序插图"的清单。
+
+    为什么需要它：实测微信编辑器**不会**抓取正文里的本地图片路径，也不会抓外链，
+    正文图片只能在编辑器里逐张手动上传。只给一堆文件名，人无法判断该插在哪一节之后，
+    因此这里按正文出现顺序列出序号、文件名与所属章节。
+    """
+    raw_images = metadata.get("images")
+    if not isinstance(raw_images, list) or not raw_images:
+        return
+
+    body = [
+        entry
+        for entry in raw_images
+        if isinstance(entry, dict) and entry.get("kind") == "body"
+    ]
+    covers = [
+        entry
+        for entry in raw_images
+        if isinstance(entry, dict) and entry.get("kind") == "cover"
+    ]
+
+    console.print()
+    console.print("[bold]发布清单[/bold]")
+    if body:
+        console.print("  正文图片（按顺序在编辑器里上传）：")
+        for entry in body:
+            section = str(entry.get("section") or "").strip()
+            where = f"「{section}」一节内" if section else "正文开头处"
+            console.print(
+                f"    第 {entry.get('order')} 张  {entry.get('output')}"
+                f"  → {where}"
+            )
+    else:
+        console.print("  正文没有图片。")
+
+    if covers:
+        console.print(f"  封面：{covers[0].get('output')}（在后台单独上传）")
+
+    console.print(
+        "  步骤：浏览器打开 article.html → 全选复制 → 后台新建图文 → "
+        "可视区粘贴 → 逐张上传上面的图片 → 填标题/作者/摘要 → 手机预览后再发"
+    )
 
 
 @app.command("themes")
@@ -563,6 +609,7 @@ def preview_wechat(
     console.print(
         f"[bold green]✓[/bold green] 构建完成 {_relative(outcome.output_dir, config.root)}"
     )
+    _print_publish_checklist(outcome.metadata, config.root)
     _print_warnings(outcome.warnings)
 
     try:

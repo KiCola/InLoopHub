@@ -265,6 +265,19 @@ def test_已带内联样式的标签不算漏样式() -> None:
     assert "span" not in result.unstyled_tags
 
 
+def _code_text(html: str) -> str:
+    """取出代码块的纯文本，并把空格哨兵还原。
+
+    代码块里的空格在构建期间会被换成私有使用区哨兵（防止 HTML 解析器折叠
+    连续空格导致缩进丢失），最终产物字符串里已还原；这里从 HTML 再解析一次时
+    需要自己还原，否则看到的是一串哨兵字符。
+    """
+    from inloop.renderer.wechat import _restore_code_spaces
+
+    pre = BeautifulSoup(html, "html.parser").find("pre")
+    return _restore_code_spaces(pre.get_text())
+
+
 def test_代码块保留缩进与词间空格() -> None:
     """代码块的空白必须逐字符保留。
 
@@ -289,7 +302,7 @@ def test_代码块保留缩进与词间空格() -> None:
     result = render_wechat_html(
         html, config=load_config(), stylesheet=load_stylesheet(load_config())
     )
-    text = BeautifulSoup(result.html, "html.parser").find("pre").get_text()
+    text = _code_text(result.html)
 
     assert "from dataclasses import dataclass" in text, "词间空格被折叠了"
     indents = {
@@ -309,5 +322,4 @@ def test_无语言标识的代码块同样保留缩进() -> None:
     result = render_wechat_html(
         html, config=load_config(), stylesheet=load_stylesheet(load_config())
     )
-    text = BeautifulSoup(result.html, "html.parser").find("pre").get_text()
-    assert "    indented" in text, "无语言标识时缩进也不该丢"
+    assert "    indented" in _code_text(result.html), "无语言标识时缩进也不该丢"
