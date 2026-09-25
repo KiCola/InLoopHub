@@ -1,0 +1,9 @@
+{
+  "id": "inloop-notes",
+  "name": "InLoop 手记",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "在 Obsidian 里管理 InLoop 手记的推文：新建、实时预览、构建并复制到微信公众号。",
+  "author": "Zero Zhao",
+  "isDesktopOnly": true
+}

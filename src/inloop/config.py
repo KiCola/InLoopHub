@@ -51,7 +51,15 @@ class ConfigError(RuntimeError):
     """配置缺失或格式非法。
 
     错误信息必须说明「哪里错了 + 怎么修」，见 AGENTS.md §4。
+
+    ``code`` 是给**程序**判断用的（见 :mod:`inloop.jsonapi`）：
+    插件需要区分"内容目录没配好，应当引导用户去设置界面"与"意外故障"，
+    两者的界面反应完全不同。默认 ``config_invalid``。
     """
+
+    def __init__(self, message: str, *, code: str = "config_invalid") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -269,7 +277,8 @@ def _as_directory(value: Path | str, source: str) -> Path:
             f"内容目录不存在：{candidate}\n"
             f"  来源：{source}\n"
             f"修正方法：确认路径拼写正确、目录已创建；"
-            f"或改用 `--content <路径>` 临时指定另一个目录。"
+            f"或改用 `--content <路径>` 临时指定另一个目录。",
+            code="content_root_missing",
         )
     return candidate
 

@@ -200,6 +200,79 @@ def test_文章路径相对内容目录(content_dir: Path) -> None:
     assert not Path(article["path"]).is_absolute()
 
 
+def test_顶层指针字段是绝对路径(content_dir: Path) -> None:
+    """契约是**双向**的，两侧都要有断言。
+
+    这条守的是另一侧：顶层"指针"字段（content_root / output_dir / html_path …）
+    **必须**是绝对路径，因为插件要用它直接读写文件。
+    如果只测"产物 metadata 无绝对路径"，将来有人"统一路径风格"时
+    会把这一侧改坏而测试不报警（独立审核指出的缺口）。
+    """
+    _, listed = invoke_json(content_dir, "list")
+    assert Path(listed["content_root"]).is_absolute(), listed["content_root"]
+
+    _, built = invoke_json(content_dir, "build-wechat", "001-json-test")
+    for field in ("output_dir", "html_path", "preview_path", "metadata_path"):
+        assert Path(built[field]).is_absolute(), f"{field} 应是绝对路径：{built[field]}"
+        assert Path(built[field]).exists(), f"{field} 指向的文件应存在：{built[field]}"
+
+
+def test_路径分隔符统一为正斜杠(content_dir: Path) -> None:
+    """同一份 JSON 里不能一半反斜杠一半正斜杠。
+
+    插件做字符串比较与拼接时，`E:\\x\\y` 与 `E:/x/y` 不相等，
+    混用会制造极难定位的 bug（独立审核发现的）。
+    """
+    _, data = invoke_json(content_dir, "build-wechat", "001-json-test")
+    for field in ("content_root", "output_dir", "html_path", "preview_path", "metadata_path"):
+        value = data[field]
+        assert "\\" not in value, f"{field} 里出现了反斜杠：{value}"
+    for entry in data["images"]:
+        assert "\\" not in entry["output"], entry["output"]
+        assert "\\" not in entry["source"], entry["source"]
+
+
+def test_内容目录没有配好时给出可判断的错误码(tmp_path: Path) -> None:
+    """插件要据此区分"去设置界面配置"与"意外故障"。"""
+    missing = tmp_path / "not-configured"
+    result = runner.invoke(app, ["--content", str(missing), "--json", "list"])
+    data = json.loads(result.stdout)
+    assert data["ok"] is False
+    assert data["error"]["code"] == "content_root_missing"
+
+
+def test_传入年份目录时给出结构性提示() -> None:
+    """把年份目录当成内容目录是最常见且最难自查的误配。
+
+    判据是结构性的（``2026`` 恰好是本工具规定的层级），不是猜意图。
+    """
+    examples = REPO_ROOT / "examples"
+    year_dir = examples / "2026"
+    if not year_dir.is_dir():
+        pytest.skip("examples/2026 不存在")
+
+    result = runner.invoke(app, ["--content", str(year_dir), "list"])
+    assert "年份目录" in result.output
+    assert "上一级" in result.output
+
+
+def test_传入单篇文章目录时给出结构性提示() -> None:
+    article_dir = REPO_ROOT / "examples" / "2026" / "002-light-o1"
+    if not article_dir.is_dir():
+        pytest.skip("示例文章不存在")
+
+    result = runner.invoke(app, ["--content", str(article_dir), "list"])
+    assert "单个文章的目录" in result.output
+
+
+def test_正确的内容目录不会被误判() -> None:
+    """提示必须只在真的传错时出现，否则是噪音。"""
+    examples = REPO_ROOT / "examples"
+    result = runner.invoke(app, ["--content", str(examples), "list"])
+    assert result.exit_code == 0
+    assert "注意：传入" not in result.output
+
+
 def test_产物_metadata_不含绝对路径(content_dir: Path) -> None:
     """metadata.json 是**产物**：要可分享、可复现，因此路径一律相对内容目录。
 
@@ -271,7 +344,7 @@ def test_JSON_模式同样走配置层(mini_repo: Path, tmp_path: Path) -> None:
     result = runner.invoke(app, ["--json", "list"], env={"INLOOP_ROOT": str(mini_repo)})
     data = json.loads(result.stdout)
     assert data["ok"] is True
-    assert data["content_root"] == str(target.resolve()), (
+    assert data["content_root"] == target.resolve().as_posix(), (
         f"配置文件里的内容目录没有生效：得到 {data.get('content_root')}"
     )
     assert [a["dir_name"] for a in data["articles"]] == ["001-configured"]

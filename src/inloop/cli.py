@@ -65,7 +65,7 @@ def _config_or_fail() -> Config:
     try:
         return load_config()
     except ConfigError as exc:
-        _fail(str(exc))
+        _fail(str(exc), code=exc.code)
         raise AssertionError("unreachable") from exc  # pragma: no cover
 
 
@@ -74,11 +74,14 @@ def _content_root_or_fail(config: Config) -> Path:
 
     内容目录是**所有文章相关命令的前提**：解析不出来就没有可操作的对象，
     因此这里直接失败并说明四种来源，而不是悄悄回退到某个目录。
+
+    错误码沿用 :class:`ConfigError` 的 ``code``：插件需要据此区分
+    "内容目录没配好（应引导去设置界面）"与"意外故障"。
     """
     try:
         return config.resolve_content_root(_content_override)
     except ConfigError as exc:
-        _fail(str(exc))
+        _fail(str(exc), code=exc.code)
         raise AssertionError("unreachable") from exc  # pragma: no cover
 
 
@@ -967,10 +970,19 @@ def list_articles() -> None:
     console.print(f"  {content_root}")
     console.print("[bold]文章[/bold]")
     if not locations:
+        hint = ""
+        # 结构性误配提示：把年份子目录当成内容目录是最常见且最难自查的一种
+        from inloop.jsonapi import misplaced_content_root_hint
+
+        misplaced = misplaced_content_root_hint(content_root)
+        if misplaced:
+            hint = f"\n注意：{misplaced}"
         console.print("  （暂无文章）")
         console.print(
             "  新建：`inloop new --title \"标题\" --slug your-slug --template paper-note`"
         )
+        if hint:
+            console.print(f"[yellow]{escape(hint)}[/yellow]")
         return
 
     console.print(f"  共 {len(locations)} 篇，下一个编号 {next_id:03d}")

@@ -11,8 +11,31 @@
    仍是一份合法 JSON（``{"ok": false, "error": {...}}``），
    这样调用方不必去解析 stderr 的文本。
 
-路径一律相对 ``content_root``（或产物目录），不写本机绝对路径——
-与 metadata.json 的约定一致（AGENTS.md §4）。
+## 路径约定：两类，刻意不同（调用方必读）
+
+本模块输出的路径分两类，**不要"统一风格"**——它们服务于不同用途：
+
+**第一类：顶层"指针"字段 → 绝对路径**
+
+    content_root / output_dir / html_path / preview_path / metadata_path
+
+调用方（插件）要拿它**直接读写文件**，因此必须是可直接使用的绝对路径。
+这些字段是**瞬态的**：只存在于这次命令的输出里，不落盘、不进入持久化产物。
+
+**第二类：列表项内的路径 → 相对路径**
+
+    articles[].path / images[].output / images[].source / metadata.source
+
+这些会被记录、比对，将来还可能跨机器复用（例如上传图片后回填地址），
+因此一律相对 ``content_root`` 书写。
+
+**为什么不用同一种风格**：``AGENTS.md §4`` 要求"输出保持确定性"——
+该约束针对的是**写入产物的内容**（``metadata.json`` 会被保存、比对、分享，
+绝对路径会让同一篇文章在两台机器上产出不同字节）。
+而本模块的输出是进程间消息，调用方按定义就在同一台机器上。
+
+历史教训：本模块的文档曾写"路径一律相对 content_root，不写本机绝对路径"，
+与实现矛盾。照文档实现的插件会以为无需处理绝对路径——这是独立审核发现的。
 """
 
 from __future__ import annotations
@@ -22,7 +45,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from inloop.articles import ArticleLocation, DeleteResult
+from inloop.articles import ARTICLE_FILENAME, ArticleLocation, DeleteResult
 from inloop.models.article import Article, Issue
 from inloop.rules import IssueLevel
 
@@ -161,7 +184,7 @@ def check_all_payload(
     return {
         "ok": error_count == 0,
         "schema": SCHEMA_VERSION,
-        "content_root": str(content_root),
+        "content_root": content_root.as_posix(),
         "total": len(items),
         "error_count": error_count,
         "warning_count": warning_count,
@@ -177,7 +200,7 @@ def list_payload(
     return {
         "ok": True,
         "schema": SCHEMA_VERSION,
-        "content_root": str(content_root),
+        "content_root": content_root.as_posix(),
         "count": len(items),
         "next_id": next_id,
         "articles": items,
@@ -204,7 +227,7 @@ def build_payload(outcome: object, *, content_root: Path) -> dict[str, Any]:
     return {
         "ok": True,
         "schema": SCHEMA_VERSION,
-        "content_root": str(content_root),
+        "content_root": content_root.as_posix(),
         "output_dir": outcome.output_dir.as_posix(),
         "files": [p.as_posix() for p in outcome.files],
         "html_path": (outcome.output_dir / "article.html").as_posix(),
@@ -234,11 +257,17 @@ def delete_payload(result: DeleteResult, *, base: Path, removed: bool) -> dict[s
 def deletion_preview_payload(
     location: ArticleLocation, *, base: Path, image_count: int, file_count: int
 ) -> dict[str, Any]:
-    """删除前的预览（取消时把这份数据返回给调用方）。"""
+    """删除前的预览。
+
+    ``dry_run`` 标记这次**没有真的删除**——调用方据此区分两种情况：
+    "我还没确认" 与 "删除失败了"。仅靠 ``removed: false`` 区分不出来
+    （独立审核指出的问题）。
+    """
     return {
         "ok": True,
         "schema": SCHEMA_VERSION,
         "removed": False,
+        "dry_run": True,
         "dir_name": location.dir_name,
         "path": _rel(location.directory, base),
         "file_count": file_count,
@@ -249,3 +278,55 @@ def deletion_preview_payload(
 def level_is_error(level: IssueLevel) -> bool:
     """级别判断集中一处，避免各调用点各写一遍。"""
     return level is IssueLevel.ERROR
+
+
+def misplaced_content_root_hint(content_root: Path) -> str:
+    """如果内容目录看起来"传深了一层"，返回一句提示；否则返回空串。
+
+    布局是 ``<content_root>/<年份>/<文章>/``。常见的误配有两种，且都很难自查
+    （列表为空、但路径看起来"对"）：
+
+    1. 传成了**年份目录**：``<content_root>/2026``
+       —— 该目录自己就形如年份，且其中装的是文章目录
+    2. 传成了**某篇文章目录**：``<content_root>/2026/001-xxx``
+       —— 该目录里有 ``index.md``
+
+    判据是**结构性**的，不是猜意图：这两位都恰好是本工具规定的层级
+    （独立审核的建议，我认同这个区分）。
+    """
+    try:
+        if _is_year_name(content_root.name):
+            # 其下应当直接是文章目录（含 index.md），这正好印证是年份目录
+            if any(
+                (entry / ARTICLE_FILENAME).is_file()
+                for entry in _safe_children(content_root)
+            ):
+                return (
+                    f"传入了**年份目录**。内容目录应当是它的上一级："
+                    f"{content_root.parent.as_posix()}"
+                )
+
+        if (content_root / ARTICLE_FILENAME).is_file():
+            return (
+                f"传入了**单个文章的目录**。内容目录应当是包含年份目录的那一层："
+                f"{content_root.parent.parent.as_posix()}"
+            )
+    except OSError:
+        return ""
+    return ""
+
+
+def _safe_children(directory: Path) -> list[Path]:
+    """列出子目录；读不到时返回空列表而不是抛异常（提示逻辑不该让命令失败）。"""
+    try:
+        return [entry for entry in directory.iterdir() if entry.is_dir()]
+    except OSError:
+        return []
+
+
+def _is_year_name(name: str) -> bool:
+    """目录名是否形如年份（四位数字，且在合理范围内）。"""
+    if len(name) != 4 or not name.isdigit():
+        return False
+    year = int(name)
+    return 1900 <= year <= 2999

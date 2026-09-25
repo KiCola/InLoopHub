@@ -1,0 +1,6 @@
+# 依赖与构建产物都不入库
+node_modules/
+dist/
+
+# 本机的 vault 路径配置（每台机器不同，且是绝对路径）
+vault.json
