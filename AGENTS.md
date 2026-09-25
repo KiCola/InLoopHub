@@ -33,8 +33,10 @@
 - `git` 不在 shell 的 PATH 里，完整路径为 `C:\Program Files\Git\cmd\git.exe`，调用时用完整路径。
 - Python 为 `C:\Python313\python.exe`（3.13），`python` 可直接使用。
 - **沙箱能力边界**：默认 workspace-write 模式下，MSYS2 系程序（`sh.exe`、`git` 的联网子进程、credential manager）会因无法创建命名对象而崩溃（`NtCreateDirectoryObject ... 0xC0000022`）。
-  - 结论：**本地 git 操作（`add` / `commit` / `log` / `status`）在默认模式下可用；`push`、`fetch`、`clone` 与 `pip install` 需要完整权限模式。**
+  - 结论：**本地 git 操作（`add` / `commit` / `log` / `status`）在默认模式下可用；`push`、`fetch`、`clone` 需要完整权限模式**（已实测：默认模式 exit 128，完整权限模式 exit 0）。
   - 这类操作属于 §9 的申请情形，必须显式申请，**不得**静默降级为"跳过推送"并当作已完成。
+- **`pip` 在默认模式下即可正常工作**（含联网下载，已实测 exit 0），无需申请完整权限；但 pip 无法清理系统临时目录，会在 `%TEMP%` 留下残留。
+  - 因此安装依赖时**把临时目录指向工作区内**（如设置 `TMPDIR`/`TEMP` 到工作区的临时子目录），用完即清，避免污染系统目录（§5「不留垃圾」）。
 - 工作目录 `E:\InLoopHub` 的属主与显式 ACE 已配置（`ZERO\zzr:(OI)(CI)(F)`），默认沙箱在工作区内可正常读写与执行。
 
 ---
