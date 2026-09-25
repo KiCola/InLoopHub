@@ -31,3 +31,9 @@ desktop.ini
 
 # --- 工作区内的临时目录（安装依赖等操作的临时落地处，见 AGENTS.md §2.1）---
 .tmp/
+.tmp*/
+
+# 防护：`tempfile.mkdtemp()` 在 TEMP 被指向相对路径时会在仓库根留下 tmpXXXX 目录。
+# 这类目录绝不应入库，加一条保险以免再次误提交。
+tmp??????/
+tmp*/
