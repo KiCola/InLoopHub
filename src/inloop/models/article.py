@@ -20,6 +20,31 @@ from pathlib import Path
 from typing import Any
 
 from inloop.parser.frontmatter import FrontMatter, FrontMatterError, parse_front_matter
+from inloop.rules import (
+    FM_DIR_ID_MISMATCH,
+    FM_DIR_NAME_FORMAT,
+    FM_EMPTY_SUMMARY,
+    FM_EMPTY_TAGS,
+    FM_EMPTY_TITLE,
+    FM_FIELD_NOT_STRING,
+    FM_FUTURE_DATE,
+    FM_INVALID_CATEGORY,
+    FM_INVALID_DATE,
+    FM_INVALID_ID,
+    FM_INVALID_SLUG,
+    FM_INVALID_STATUS,
+    FM_MISSING_FIELD,
+    FM_NO_TITLE_HEADING,
+    FM_PLATFORMS_NOT_MAPPING,
+    FM_SUMMARY_TOO_LONG,
+    FM_TAG_NOT_BOOL,
+    FM_TAG_NOT_STRING,
+    FM_TAGS_NOT_LIST,
+    FM_WECHAT_DISABLED,
+    IssueLevel,
+    Rule,
+    get_rule,
+)
 
 
 class Status(StrEnum):
@@ -77,36 +102,38 @@ SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 #: 目录名形如 ``001-hello-inloop``
 ARTICLE_DIR_PATTERN = re.compile(r"^(?P<number>\d{3})-(?P<slug>.+)$")
 
-_DATE_FORMAT = "%Y-%m-%d"
-
-
-class IssueLevel(StrEnum):
-    """问题级别。判定权在任务书，不在实现者手里。"""
-
-    ERROR = "ERROR"
-    WARNING = "WARNING"
-
 
 @dataclass(frozen=True, slots=True)
 class Issue:
     """一条校验问题。
 
+    ``rule`` 持有规则表里的规则对象而不是裸字符串：级别、说明都只有一处定义，
+    "报出的级别与规则表不一致"因此在类型层面不可能发生。
+
     Attributes:
-        code: 规则码，便于稳定引用与后续 CI 判断。
-        level: 级别。
+        rule: 命中的规则，来自 :mod:`inloop.rules`。
+        message: 人话说明，包含「哪里错了 + 为什么 + 怎么改」。
         field: 涉及的 front matter 字段名；与字段无关时为 None。
-        message: 人话说明，包含「哪里错了 + 怎么改」。
         line: 源文件行号（1 起）；无法定位时为 None。
     """
 
-    code: str
-    level: IssueLevel
+    rule: Rule
     message: str
     field: str | None = None
     line: int | None = None
 
+    @property
+    def code(self) -> str:
+        """规则码，转发自规则表。"""
+        return self.rule.code
+
+    @property
+    def level(self) -> IssueLevel:
+        """问题级别，转发自规则表。"""
+        return self.rule.level
+
     def render(self, path: Path | None = None) -> str:
-        """格式化为一行可读文本，形如 ``文件:行号 规则码 说明``。"""
+        """格式化为一行可读文本，形如 ``文件:行号 规则码 [级别] 说明``。"""
         location = str(path) if path else "<内存>"
         if self.line is not None:
             location = f"{location}:{self.line}"
@@ -175,6 +202,16 @@ class Article:
         """文章目录名，形如 ``002-light-o1``（任务书 §3）。"""
         return f"{self.id:03d}-{self.slug}"
 
+    def to_markdown(self, body: str | None = None) -> str:
+        """渲染为完整的 Markdown 文本（front matter + 正文）。
+
+        实现在 :mod:`inloop.models.serializer`；这里只做转发，避免调用方
+        为了「把文章写回文本」而多 import 一个模块。
+        """
+        from inloop.models.serializer import render_article_text
+
+        return render_article_text(self, body=body)
+
     def publishes_to(self, platform: str) -> bool:
         """判断文章是否要发布到某个平台。"""
         return bool(self.platforms.get(platform, False))
@@ -217,8 +254,7 @@ class Article:
         for name in missing:
             issues.append(
                 Issue(
-                    code="FM001",
-                    level=IssueLevel.ERROR,
+                    rule=FM_MISSING_FIELD,
                     field=name,
                     line=1,
                     message=(
@@ -245,8 +281,7 @@ class Article:
         if slug and not SLUG_PATTERN.match(slug):
             issues.append(
                 Issue(
-                    code="FM002",
-                    level=IssueLevel.ERROR,
+                    rule=FM_INVALID_SLUG,
                     field="slug",
                     message=(
                         f"slug 格式不合法：`{slug}`。"
@@ -266,8 +301,7 @@ class Article:
         if not tags:
             issues.append(
                 Issue(
-                    code="FM003",
-                    level=IssueLevel.WARNING,
+                    rule=FM_EMPTY_TAGS,
                     field="tags",
                     line=1,
                     message=(
@@ -281,8 +315,7 @@ class Article:
         if not summary:
             issues.append(
                 Issue(
-                    code="FM004",
-                    level=IssueLevel.WARNING,
+                    rule=FM_EMPTY_SUMMARY,
                     field="summary",
                     line=1,
                     message="summary 为空。修正方法：补上一句话摘要，发布时要用。",
@@ -291,8 +324,7 @@ class Article:
         elif len(summary) > 120:
             issues.append(
                 Issue(
-                    code="FM005",
-                    level=IssueLevel.WARNING,
+                    rule=FM_SUMMARY_TOO_LONG,
                     field="summary",
                     message=(
                         f"summary 过长（{len(summary)} 字，建议不超过 120 字）。"
@@ -306,8 +338,7 @@ class Article:
         if parsed_date > today:
             issues.append(
                 Issue(
-                    code="FM006",
-                    level=IssueLevel.WARNING,
+                    rule=FM_FUTURE_DATE,
                     field="date",
                     message=(
                         f"date 晚于今天（{parsed_date.isoformat()} > {today.isoformat()}）。"
@@ -320,8 +351,7 @@ class Article:
         if not any(line.startswith("# ") for line in front.body.splitlines()):
             issues.append(
                 Issue(
-                    code="FM007",
-                    level=IssueLevel.WARNING,
+                    rule=FM_NO_TITLE_HEADING,
                     line=front.body_offset,
                     message=(
                         "正文中没有一级标题（`# 标题`）。"
@@ -332,6 +362,12 @@ class Article:
 
         known = set(REQUIRED_FIELDS)
         extra = {key: value for key, value in meta.items() if key not in known}
+
+        # 一致性自检：报出的规则码必须存在于规则表中。
+        # 放在这里而不是只在测试里，是因为"报了一个没人认识的错误码"属于程序缺陷，
+        # 必须立刻暴露，不能让用户拿着一个查不到的码去搜索。
+        for issue in issues:
+            get_rule(issue.code)
 
         return cls(
             id=article_id,
@@ -376,8 +412,7 @@ def _parse_id(value: Any, issues: list[Issue]) -> tuple[int, bool]:
     except (TypeError, ValueError):
         issues.append(
             Issue(
-                code="FM008",
-                level=IssueLevel.ERROR,
+                rule=FM_INVALID_ID,
                 field="id",
                 message=(
                     f"id 必须是整数，实际为 `{value}`。"
@@ -398,8 +433,7 @@ def _parse_str(value: Any, name: str, issues: list[Issue]) -> str:
         text = str(value)
         issues.append(
             Issue(
-                code="FM009",
-                level=IssueLevel.ERROR,
+                rule=FM_FIELD_NOT_STRING,
                 field=name,
                 message=(
                     f"`{name}` 应为字符串，YAML 把它解析成了 {type(value).__name__}（`{value}`）。"
@@ -411,8 +445,7 @@ def _parse_str(value: Any, name: str, issues: list[Issue]) -> str:
         text = ""
         issues.append(
             Issue(
-                code="FM009",
-                level=IssueLevel.ERROR,
+                rule=FM_FIELD_NOT_STRING,
                 field=name,
                 message=(
                     f"`{name}` 应为字符串，实际为 {type(value).__name__}。"
@@ -424,11 +457,10 @@ def _parse_str(value: Any, name: str, issues: list[Issue]) -> str:
     if name == "title" and not text:
         issues.append(
             Issue(
-                code="FM010",
-                level=IssueLevel.ERROR,
+                    rule=FM_EMPTY_TITLE,
                 field="title",
                 message="title 不能为空。修正方法：补上文章标题。",
-            )
+                )
         )
     return text
 
@@ -455,8 +487,7 @@ def _parse_date(value: Any, issues: list[Issue]) -> date:
         except ValueError as exc:
             issues.append(
                 Issue(
-                    code="FM011",
-                    level=IssueLevel.ERROR,
+                    rule=FM_INVALID_DATE,
                     field="date",
                     message=(
                         f"date 不是真实存在的日期：`{text}`（{exc}）。"
@@ -468,8 +499,7 @@ def _parse_date(value: Any, issues: list[Issue]) -> date:
 
     issues.append(
         Issue(
-            code="FM011",
-            level=IssueLevel.ERROR,
+            rule=FM_INVALID_DATE,
             field="date",
             message=(
                 f"date 格式不合法：`{text}`。要求 `YYYY-MM-DD`。"
@@ -490,8 +520,7 @@ def _parse_category(value: Any, issues: list[Issue]) -> Category:
     except ValueError:
         issues.append(
             Issue(
-                code="FM012",
-                level=IssueLevel.ERROR,
+                rule=FM_INVALID_CATEGORY,
                 field="category",
                 message=(
                     f"category 取值不合法：`{text}`。允许的取值为：{allowed}（任务书 §16）。"
@@ -512,8 +541,7 @@ def _parse_status(value: Any, issues: list[Issue]) -> Status:
     except ValueError:
         issues.append(
             Issue(
-                code="FM013",
-                level=IssueLevel.ERROR,
+                rule=FM_INVALID_STATUS,
                 field="status",
                 message=(
                     f"status 取值不合法：`{text}`。允许的取值为：{allowed}（任务书 §4）。"
@@ -533,8 +561,7 @@ def _parse_tags(value: Any, issues: list[Issue]) -> tuple[str, ...]:
         if value.strip():
             issues.append(
                 Issue(
-                    code="FM014",
-                    level=IssueLevel.ERROR,
+                    rule=FM_TAGS_NOT_LIST,
                     field="tags",
                     message=(
                         f"tags 应为列表，实际是一个字符串（`{value.strip()}`）。"
@@ -555,8 +582,7 @@ def _parse_tags(value: Any, issues: list[Issue]) -> tuple[str, ...]:
             else:
                 issues.append(
                     Issue(
-                        code="FM019",
-                        level=IssueLevel.WARNING,
+                        rule=FM_TAG_NOT_STRING,
                         field="tags",
                         message=(
                             f"tags 中有非字符串项（{type(item).__name__}：`{item}`），已忽略。"
@@ -567,8 +593,7 @@ def _parse_tags(value: Any, issues: list[Issue]) -> tuple[str, ...]:
         return tuple(tags)
     issues.append(
         Issue(
-            code="FM014",
-            level=IssueLevel.ERROR,
+            rule=FM_TAGS_NOT_LIST,
             field="tags",
             message=(
                 f"tags 应为列表，实际为 {type(value).__name__}。"
@@ -588,8 +613,7 @@ def _parse_platforms(value: Any, issues: list[Issue]) -> dict[str, bool]:
     if not isinstance(value, dict):
         issues.append(
             Issue(
-                code="FM015",
-                level=IssueLevel.ERROR,
+                rule=FM_PLATFORMS_NOT_MAPPING,
                 field="platforms",
                 message=(
                     f"platforms 应为映射，实际为 {type(value).__name__}。"
@@ -604,8 +628,7 @@ def _parse_platforms(value: Any, issues: list[Issue]) -> dict[str, bool]:
         if not isinstance(raw, bool):
             issues.append(
                 Issue(
-                    code="FM019",
-                    level=IssueLevel.WARNING,
+                    rule=FM_TAG_NOT_BOOL,
                     field="platforms",
                     message=(
                         f"platforms.{key} 不是布尔值（实际 `{raw}`），已按真假转换。"
@@ -618,8 +641,7 @@ def _parse_platforms(value: Any, issues: list[Issue]) -> dict[str, bool]:
     if not platforms.get("wechat", False):
         issues.append(
             Issue(
-                code="FM016",
-                level=IssueLevel.ERROR,
+                rule=FM_WECHAT_DISABLED,
                 field="platforms",
                 message=(
                     "platforms.wechat 必须为 true：当前阶段的目标平台就是微信公众号。"
@@ -638,8 +660,7 @@ def _check_directory_name(source: Path | None, article_id: int) -> Issue | None:
     match = ARTICLE_DIR_PATTERN.match(source.parent.name)
     if match is None:
         return Issue(
-            code="FM017",
-            level=IssueLevel.WARNING,
+            rule=FM_DIR_NAME_FORMAT,
             line=1,
             message=(
                 f"文章目录名 `{source.parent.name}` 不符合 `三位序号-slug` 的约定。"
@@ -650,8 +671,7 @@ def _check_directory_name(source: Path | None, article_id: int) -> Issue | None:
     directory_number = int(match.group("number"))
     if directory_number != article_id:
         return Issue(
-            code="FM018",
-            level=IssueLevel.WARNING,
+            rule=FM_DIR_ID_MISMATCH,
             line=1,
             message=(
                 f"目录名序号 `{directory_number:03d}` 与 front matter 的 id `{article_id}` 不一致。"
