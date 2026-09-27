@@ -12,7 +12,7 @@
  */
 
 import { build } from "esbuild";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -157,6 +157,18 @@ try {
 } catch (error) {
   check("错误码为 cli_not_found", error?.code === "cli_not_found", error?.code);
   check("提示指向插件设置", (error?.hint ?? "").includes("设置"), error?.hint);
+}
+
+// 单篇校验的非零退出码仍须保留具体诊断，不能变成原始 JSON 错误文本。
+const sourcePath = join(articleDir, "index.md");
+const sourceText = readFileSync(sourcePath, "utf8");
+writeFileSync(sourcePath, sourceText.replace('status: "draft"', 'status: "wrong"').replace('summary: "冒烟测试。"', 'summary: ""'), "utf8");
+try {
+  const checked = await cli.checkArticle(options, "001-smoke");
+  check("校验错误保留 article.errors", checked.ok === false && checked.article?.errors.length > 0);
+  check("校验同时保留 article.warnings", checked.article?.warnings.length > 0);
+} catch (error) {
+  check("单篇校验返回结构化问题而非丢弃诊断", false, String(error));
 }
 
 // 清理。

@@ -13,7 +13,7 @@
  */
 
 import { build } from "esbuild";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -343,16 +343,17 @@ console.log("contentPathToVault（内容目录可能是接进 vault 的目录联
 }
 
 // 只替代宿主提供的类；文章识别与活动文件回退运行插件的真实实现。
-const pluginModule = await bundle("src/main.ts", "main.cjs", [{
+const hostPlugins = [{
   name: "obsidian-test-host",
   setup(builder) {
     builder.onResolve({ filter: /^obsidian$/ }, () => ({ path: "obsidian", namespace: "test-host" }));
     builder.onLoad({ filter: /.*/, namespace: "test-host" }, () => ({
       contents: `export class Plugin {}
         export class PluginSettingTab {}
-        export class ItemView {}
+        export class ItemView { constructor(leaf) { this.app = leaf.app; this.contentEl = leaf.contentEl; } }
+        export const MarkdownView = globalThis.TestMarkdownView ?? class {};
         export class TFile {}
-        export class Notice {}
+        export class Notice { hide() {} }
         export class Setting {}
         export const normalizePath = p => p;
         export const debounce = fn => fn;
@@ -360,7 +361,8 @@ const pluginModule = await bundle("src/main.ts", "main.cjs", [{
       loader: "js",
     }));
   },
-}]);
+}];
+const pluginModule = await bundle("src/main.ts", "main.cjs", hostPlugins);
 console.log("文章重命名后的识别与面板焦点回退");
 {
   const plugin = new pluginModule.default();
@@ -390,6 +392,255 @@ console.log("文章重命名后的识别与面板焦点回退");
   file.name = "index.md";
   file.path = "Other/2026/004-gpt6/index.md";
   check("内容目录外的正文不被识别", plugin.activeSlug() === "");
+}
+
+console.log("当前文章与产物必须绑定");
+{
+  const plugin = new pluginModule.default();
+  const article = (slug) => ({ name: "index.md", extension: "md",
+    path: `InLoopContent/2026/${slug}/index.md`, parent: { name: slug } });
+  const a = article("001-a");
+  const b = article("002-b");
+  let active = a;
+  plugin.settings.contentRoot = "C:/vault/InLoopContent";
+  plugin.app = {
+    vault: { adapter: { getBasePath: () => "C:/vault" } },
+    workspace: {
+      getActiveFile: () => active,
+      getMostRecentLeaf: () => ({ view: {} }),
+      getLeavesOfType: () => [{ view: { file: a } }, { view: { file: b } }],
+    },
+  };
+  plugin.activeSlug();
+  active = b;
+  plugin.activeSlug();
+  active = null;
+  check("面板失焦后保留 B，不回退到列表第一篇 A", plugin.activeSlug() === "002-b");
+  plugin.lastBuild = { metadata: { slug: "001-a" } };
+  check("当前 B 不得取出 A 的旧产物", plugin.getLastBuild() === null);
+  b.name = "改名.md";
+  b.path = "InLoopContent/2026/002-b/改名.md";
+  check("当前正文改名后不能偷偷选中 A", plugin.activeSlug() === "");
+  check("改名后提供恢复 index.md 的提示", plugin.articleHint?.().includes("index.md") === true);
+}
+
+// 最小宿主 DOM：只提供视图实际调用的元素操作，不替代业务方法。
+class TestElement {
+  children = [];
+  style = {};
+  attrs = {};
+  text = "";
+  createEl(tag, options = {}) {
+    const child = new TestElement();
+    child.tag = tag;
+    child.text = options.text ?? "";
+    child.cls = options.cls ?? "";
+    this.children.push(child);
+    return child;
+  }
+  createDiv(options) { return this.createEl("div", options); }
+  createSpan(options) { return this.createEl("span", options); }
+  empty() { this.children = []; this.text = ""; }
+  setText(text) { this.text = text; }
+  toggleClass() {}
+  addClass() {}
+  setAttribute(key, value) { this.attrs[key] = value; }
+  appendChild(child) { this.children.push(child); }
+  remove() {}
+  hide() {}
+  show() {}
+  allText() { return this.text + this.children.map(c => c.allText()).join(" "); }
+}
+globalThis.createDiv = (options) => new TestElement().createDiv(options);
+const viewModule = await bundle("src/view.ts", "view.cjs", hostPlugins);
+console.log("文章列表操作与异步预览");
+{
+  const file = { path: "InLoopContent/2026/002-b/index.md" };
+  let opened = null;
+  let selected = null;
+  const editorLeaf = { openFile: async (target) => { opened = target; } };
+  const app = {
+    vault: {
+      adapter: { getBasePath: () => "C:/vault" },
+      getAbstractFileByPath: () => file,
+    },
+    workspace: {
+      getLeavesOfType: () => [editorLeaf],
+      getLeaf: () => { throw new Error("不应将预览面板替换成编辑器"); },
+    },
+  };
+  const plugin = {
+    cliOptions: () => ({ contentRoot: "C:/vault/InLoopContent" }),
+    selectArticle: (value) => { selected = value; },
+    refreshPreview: () => {},
+  };
+  const view = new viewModule.InloopPreviewView({ app }, plugin);
+  const row = view.renderArticleRow({ path: "2026/002-b/index.md", dir_name: "002-b", parsable: false }, false);
+  const title = row.children[0].children[0];
+  check("文章标题是可键盘操作的按钮", title.tag === "button" && typeof title.onclick === "function");
+  try {
+    await view.openArticle({ path: "2026/002-b/index.md" });
+    check("点击文章在编辑叶子打开并选择，保留面板", opened === file && selected === file);
+  } catch (error) {
+    check("点击文章在编辑叶子打开并选择，保留面板", false, String(error));
+  }
+}
+{
+  const htmlPath = join(outDir, "preview.html");
+  writeFileSync(htmlPath, "<body>旧文章正文</body>", "utf8");
+  let slug = "001-a";
+  let finish;
+  const delayed = new Promise(resolve => { finish = resolve; });
+  const plugin = {
+    activeSlug: () => slug,
+    currentArticle: () => ({ path: `${slug}/index.md` }),
+    buildCurrent: () => delayed,
+    runRaw: () => delayed,
+    getLastBuild: () => null,
+  };
+  const view = new viewModule.InloopPreviewView({ app: { workspace: { getActiveFile: () => null } } }, plugin);
+  view.previewEl = new TestElement();
+  view.statusEl = new TestElement();
+  view.readArticleText = () => null;
+  const pending = view.renderPreview();
+  slug = "002-b";
+  finish({ html_path: htmlPath, output_dir: outDir, body_images: [], content_hash: "old" });
+  await pending;
+  check("切到 B 后 A 的慢请求不能写入预览", !view.previewEl.children.some(c => c.tag === "iframe"));
+  plugin.buildCurrent = async () => { throw new Error("测试构建失败"); };
+  plugin.runRaw = plugin.buildCurrent;
+  await view.renderPreview();
+  check("失败状态明确且带原因", view.statusEl.allText().includes("更新失败") && view.previewEl.allText().includes("测试构建失败"));
+}
+{
+  const file = { path: "a/index.md" };
+  let revision = 1;
+  const view = new viewModule.InloopPreviewView({ app: {} }, {
+    currentArticle: () => file,
+    articleVersion: () => revision,
+  });
+  view.validationEl = new TestElement();
+  view.renderCurrentArticle();
+  view.validationEl.setText("文章属性校验通过。");
+  revision += 1;
+  view.renderCurrentArticle();
+  check("同篇编辑后不保留过期校验通过提示", !view.validationEl.allText().includes("校验通过"));
+}
+
+globalThis.TestMarkdownView = class {};
+const buildModule = await bundle("src/main.ts", "build-main.cjs", [...hostPlugins, {
+  name: "cli-test-boundary",
+  setup(builder) {
+    builder.onResolve({ filter: /^\.\/inloop\/cli$/ }, () => ({ path: "cli", namespace: "test-cli" }));
+    builder.onLoad({ filter: /.*/, namespace: "test-cli" }, () => ({
+      contents: `export const buildArticle = (...args) => globalThis.buildStub(...args);
+        export const checkArticle = (...args) => globalThis.checkStub(...args);
+        export const createArticle = () => {};
+        export const deleteArticle = () => {};
+        export const listArticles = () => {};
+        export const runCli = () => {};
+        export const setStatus = () => {};
+        export const guessExecutable = () => {};
+        export const STATUSES = [];`,
+      loader: "js",
+    }));
+  },
+}]);
+console.log("保存与构建版本绑定");
+{
+  const plugin = new buildModule.default();
+  const file = (name) => ({ name: "index.md", extension: "md", path: `InLoopContent/2026/${name}/index.md`, parent: { name } });
+  const a = file("001-a");
+  const b = file("002-b");
+  let active = a;
+  let saved = false;
+  const editor = new globalThis.TestMarkdownView();
+  editor.file = a;
+  editor.save = async () => { saved = true; };
+  plugin.settings.contentRoot = "C:/vault/InLoopContent";
+  plugin.cliOptions = () => ({});
+  plugin.app = {
+    vault: { adapter: { getBasePath: () => "C:/vault" } },
+    workspace: {
+      getActiveFile: () => active,
+      getMostRecentLeaf: () => null,
+      getLeavesOfType: () => [{ view: editor }],
+    },
+  };
+  const output = { metadata: { title: "文章 A" }, body_images: [] };
+  globalThis.buildStub = async (_options, target) => {
+    check("构建前已保存当前编辑器且目标为 A", saved && target === "001-a");
+    return output;
+  };
+  await plugin.buildCurrent();
+  check("当前文章构建后即可打开产物", plugin.getLastBuild() === output);
+  globalThis.buildStub = async () => { throw new Error("构建失败"); };
+  try { await plugin.buildCurrent(); } catch { /* 本用例预期失败 */ }
+  check("重建失败不能继续提供旧产物", plugin.getLastBuild() === null);
+  let finish;
+  let started;
+  const startedPromise = new Promise(resolve => { started = resolve; });
+  globalThis.buildStub = () => { started(); return new Promise(resolve => { finish = resolve; }); };
+  const pending = plugin.buildCurrent();
+  await startedPromise;
+  active = b;
+  plugin.activeSlug();
+  finish(output);
+  let rejected = false;
+  try { await pending; } catch { rejected = true; }
+  check("切换文章后旧构建被拒绝且产物不可用", rejected && plugin.getLastBuild() === null);
+  active = a;
+  globalThis.checkStub = async () => ({ article: { errors: [{ code: "E1", level: "ERROR", message: "错误示例" }], warnings: [{ code: "W1", level: "WARNING", message: "警告示例" }] } });
+  const issues = await plugin.checkCurrent();
+  check("校验界面收到单篇错误与警告", issues.length === 2 && issues[0].includes("错误示例") && issues[1].includes("警告示例"));
+  let releaseFirst;
+  let markStarted;
+  let calls = 0;
+  const producedPath = join(outDir, "serial-build.html");
+  const firstStarted = new Promise(resolve => { markStarted = resolve; });
+  globalThis.buildStub = async () => {
+    calls += 1;
+    const content = calls === 1 ? "旧内容" : "新内容";
+    if (calls === 1) {
+      markStarted();
+      await new Promise(resolve => { releaseFirst = resolve; });
+    }
+    writeFileSync(producedPath, content, "utf8");
+    return output;
+  };
+  const oldBuild = plugin.buildCurrent().catch(error => error);
+  await firstStarted;
+  plugin.invalidateArticle();
+  const newBuild = plugin.buildCurrent();
+  // 等待第二次请求越过保存的微任务，但不释放第一个构建。
+  await new Promise(resolve => setImmediate(resolve));
+  check("预览与复制共享队列，旧构建结束前不启动新构建", calls === 1);
+  releaseFirst();
+  const oldResult = await oldBuild;
+  await newBuild;
+  check("旧构建被拒绝，新构建随后成功且成为唯一产物", oldResult instanceof Error && calls === 2 && plugin.getLastBuild() === output);
+  check("最后落盘的内容属于新版本", readFileSync(producedPath, "utf8") === "新内容");
+  let releaseSuccess;
+  let signalStarted;
+  const successStarted = new Promise(resolve => { signalStarted = resolve; });
+  calls = 0;
+  globalThis.buildStub = async () => {
+    calls += 1;
+    if (calls === 1) {
+      signalStarted();
+      await new Promise(resolve => { releaseSuccess = resolve; });
+      return output;
+    }
+    throw new Error("第二次构建失败");
+  };
+  const first = plugin.buildCurrent();
+  await successStarted;
+  const second = plugin.buildCurrent().catch(error => error);
+  await new Promise(resolve => setImmediate(resolve));
+  releaseSuccess();
+  await first;
+  const secondResult = await second;
+  check("同版本排队重建失败不遗留前一次产物", secondResult instanceof Error && plugin.getLastBuild() === null);
 }
 
 rmSync(outDir, { recursive: true, force: true });

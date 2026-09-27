@@ -7,6 +7,7 @@
 | `getting-started.md` | 上手补遗：首次配置、命令执行位置、建议的写作节奏（完整用法见 README） |
 | `architecture.md` | Article Model、Parser、Renderer、Wechat Adapter、Asset Pipeline、发布接口的架构说明（任务书 §29 指定必须解释这六项） |
 | `content-workflow.md` | 从 idea 到 published 的内容工作流（任务书 §17） |
+| `obsidian-interaction.md` | 当前文章、预览与产物绑定的交互约定及宿主验收清单 |
 | `publishing-guide.md` | 构建产物如何复制进微信公众号后台的逐步操作（任务书 §18） |
 | `style-guide.md` | 写作层面的规范：标题写法、术语、图片规格、三种引用形态 |
 | `roadmap.md` | 第一/二/三阶段规划与当前落点 |

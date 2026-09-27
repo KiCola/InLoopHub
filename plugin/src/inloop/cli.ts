@@ -102,6 +102,12 @@ export interface ListResult extends Envelope {
 }
 
 export interface CheckResult extends Envelope {
+  article: ArticleSummary;
+  error_count: number;
+  warning_count: number;
+}
+
+export interface CheckAllResult extends Envelope {
   content_root: string;
   total: number;
   error_count: number;
@@ -268,6 +274,13 @@ export async function runCli<T extends Envelope>(
     stdout = failure.stdout ?? "";
     stderr = failure.stderr ?? "";
     const parsed = tryParse<T>(stdout);
+    // check 的退出码 1 表示校验发现问题，单篇诊断仍是有效结果。
+    if (args[0] === "check" && args[1] !== "--all" && (error as { code?: number }).code === 1 && parsed?.schema === 1) {
+      const checked = parsed as unknown as CheckResult;
+      if (Array.isArray(checked.article?.errors) && Array.isArray(checked.article?.warnings)) {
+        return parsed;
+      }
+    }
     if (parsed?.error) {
       throw new InloopError(parsed.error.code, parsed.error.message, parsed.error.hint ?? "");
     }
@@ -312,8 +325,8 @@ export function checkArticle(options: CliOptions, slug: string): Promise<CheckRe
   return runCli<CheckResult>(options, ["check", slug], true);
 }
 
-export function checkAll(options: CliOptions): Promise<CheckResult> {
-  return runCli<CheckResult>(options, ["check", "--all"]);
+export function checkAll(options: CliOptions): Promise<CheckAllResult> {
+  return runCli<CheckAllResult>(options, ["check", "--all"]);
 }
 
 export function buildArticle(options: CliOptions, slug: string): Promise<BuildResult> {

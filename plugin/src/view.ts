@@ -5,7 +5,7 @@
  * 编辑文章时预览区会随输入实时更新（防抖在 main.ts 里）。
  */
 
-import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, Notice, WorkspaceLeaf, setIcon, type TFile } from "obsidian";
 import type InloopPlugin from "./main";
 import type { ArticleSummary, BuildResult, ImageEntry } from "./inloop/cli";
 import { STATUSES } from "./inloop/cli";
@@ -55,6 +55,13 @@ export class InloopPreviewView extends ItemView {
   private statusEl: HTMLElement | null = null;
   private buildEl: HTMLElement | null = null;
   private formEl: HTMLElement | null = null;
+  private currentEl: HTMLElement | null = null;
+  private directoryEl: HTMLElement | null = null;
+  private validationEl: HTMLElement | null = null;
+  private articleButtons: HTMLButtonElement[] = [];
+  private currentPath = "";
+  private renderVersion = 0;
+  private articleVersion = -1;
 
   /** 是否有渲染正在进行（防止并发渲染把同一份列表追加两遍） */
   private rendering = false;
@@ -81,7 +88,7 @@ export class InloopPreviewView extends ItemView {
    * "每次都让 Python 判断"——功能不受影响，只是慢一点。
    */
   private readArticleText(): string | null {
-    const file = this.app.workspace.getActiveFile();
+    const file = this.plugin.currentArticle();
     if (!file) return null;
     const cached = this.textCache.get(file.path);
     if (cached && cached.mtime === file.stat.mtime) return cached.text;
@@ -135,6 +142,7 @@ export class InloopPreviewView extends ItemView {
   private buildLayout(): void {
     const root = this.contentEl;
     root.empty();
+    this.articleButtons = [];
     root.addClass("inloop-panel");
 
     // 工具栏
@@ -148,12 +156,20 @@ export class InloopPreviewView extends ItemView {
     const refreshBtn = toolbar.createEl("button", { cls: "inloop-btn" });
     setIcon(refreshBtn.createSpan(), "refresh-cw");
     refreshBtn.createSpan({ text: "刷新" });
-    refreshBtn.onclick = () => void this.render();
+    refreshBtn.onclick = () => {
+      this.previewHash = "";
+      void this.render();
+    };
+
+    const checkBtn = toolbar.createEl("button", { cls: "inloop-btn", text: "校验文章属性" });
+    checkBtn.onclick = () => void this.checkArticle();
+    this.articleButtons.push(checkBtn);
 
     const copyBtn = toolbar.createEl("button", { cls: "inloop-btn" });
     setIcon(copyBtn.createSpan(), "clipboard-copy");
     copyBtn.createSpan({ text: "构建并复制" });
     copyBtn.onclick = () => void this.plugin.buildAndCopy().then(() => this.renderBuildInfo());
+    this.articleButtons.push(copyBtn);
 
     const openBtn = toolbar.createEl("button", { cls: "inloop-btn" });
     setIcon(openBtn.createSpan(), "external-link");
@@ -161,13 +177,17 @@ export class InloopPreviewView extends ItemView {
     openBtn.onclick = () => {
       const build = this.plugin.getLastBuild();
       if (!build) {
-        new Notice("还没有构建产物。先点「构建并复制」。");
+        new Notice("当前文章还没有可用产物，请等待预览更新成功或点「构建并复制」。");
         return;
       }
       void this.plugin.openPath(build.html_path);
     };
+    this.articleButtons.push(openBtn);
 
+    this.currentEl = root.createDiv({ cls: "inloop-current" });
     this.statusEl = root.createDiv({ cls: "inloop-status" });
+    this.directoryEl = root.createDiv({ cls: "inloop-hint" });
+    this.validationEl = root.createDiv({ cls: "inloop-validation" });
 
     // 文章列表放进固定最大高度的滚动容器。
     // 为什么需要：文章一多，列表会把下面的预览区推出可视范围，
@@ -188,11 +208,12 @@ export class InloopPreviewView extends ItemView {
     openInBrowser.onclick = () => {
       const build = this.plugin.getLastBuild();
       if (!build) {
-        new Notice("还没有构建产物。先点「构建并复制」。");
+        new Notice("当前文章还没有可用产物，请等待预览更新成功或点「构建并复制」。");
         return;
       }
       void this.plugin.openPath(build.preview_path);
     };
+    this.articleButtons.push(openInBrowser);
 
     this.buildEl = root.createDiv({ cls: "inloop-build" });
 
@@ -221,6 +242,8 @@ export class InloopPreviewView extends ItemView {
    * - 已排队时不重复入队，避免无意义的连续重跑
    */
   async render(): Promise<void> {
+    this.renderVersion += 1;
+    this.renderCurrentArticle();
     if (this.rendering) {
       this.renderQueued = true;
       return;
@@ -241,7 +264,49 @@ export class InloopPreviewView extends ItemView {
   private async renderOnce(): Promise<void> {
     this.applyPreviewWidth();
     // 各段写的是不同容器，可以并行；串行化由 render() 保证
-    await Promise.all([this.renderArticles(), this.renderPreview(), this.renderBuildInfo()]);
+    await Promise.all([this.renderArticles(), this.renderPreview()]);
+    await this.renderBuildInfo();
+  }
+
+  private renderCurrentArticle(): void {
+    const file = this.plugin.currentArticle();
+    const path = file?.path ?? "";
+    const revision = this.plugin.articleVersion();
+    if (revision !== this.articleVersion) {
+      this.validationEl?.empty();
+      this.articleVersion = revision;
+    }
+    if (path !== this.currentPath) {
+      this.currentPath = path;
+      this.previewEl?.empty();
+      this.buildEl?.empty();
+      this.validationEl?.empty();
+      this.previewHash = "";
+    }
+    for (const button of this.articleButtons) button.disabled = !file;
+    if (!this.currentEl) return;
+    const title = file ? this.app.metadataCache.getFileCache(file)?.frontmatter?.title : null;
+    this.currentEl.setText(file
+      ? `当前文章：${typeof title === "string" ? title : file.parent?.name}\n${file.path}`
+      : this.plugin.articleHint());
+    if (!file) this.setStatus("未选择可用文章");
+  }
+
+  private async checkArticle(): Promise<void> {
+    const file = this.plugin.currentArticle();
+    if (!file || !this.validationEl) return;
+    const host = this.validationEl;
+    host.setText("正在校验文章属性…");
+    try {
+      const issues = await this.plugin.checkCurrent();
+      if (this.plugin.currentArticle() !== file) return;
+      host.empty();
+      if (issues.length === 0) host.createDiv({ text: "文章属性校验通过。" });
+      for (const issue of issues) host.createDiv({ cls: "inloop-hint", text: issue });
+    } catch (error) {
+      if (this.plugin.currentArticle() !== file) return;
+      host.setText(`校验未完成：${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private setStatus(text: string, kind: "info" | "error" | "ok" = "info"): void {
@@ -267,11 +332,11 @@ export class InloopPreviewView extends ItemView {
         cls: "inloop-hint",
         text: "检查插件设置里的「内容目录」与「inloop 可执行文件」。",
       });
-      this.setStatus("读取文章列表失败", "error");
+      this.directoryEl?.setText("读取文章列表失败");
       return;
     }
 
-    this.setStatus(`内容目录：${list.content_root}`, "ok");
+    this.directoryEl?.setText(`内容目录：${list.content_root}`);
 
     if (list.articles.length === 0) {
       host.createDiv({ cls: "inloop-hint", text: "这个内容目录里还没有文章。" });
@@ -290,8 +355,9 @@ export class InloopPreviewView extends ItemView {
     row.toggleClass("inloop-article-active", isActive);
 
     const main = row.createDiv({ cls: "inloop-article-main" });
-    const title = main.createDiv({ cls: "inloop-article-title" });
+    const title = main.createEl("button", { cls: "inloop-article-title" });
     title.setText(article.parsable ? article.title || "(无标题)" : `${article.dir_name}（无法解析）`);
+    title.onclick = () => void this.openArticle(article);
 
     const meta = main.createDiv({ cls: "inloop-article-meta" });
     meta.setText(
@@ -381,10 +447,23 @@ export class InloopPreviewView extends ItemView {
     }
     const file = this.app.vault.getAbstractFileByPath(vaultPath);
     if (file) {
-      await this.app.workspace.getLeaf().openFile(file as never);
+      await this.openInEditor(file as TFile);
       return;
     }
     new Notice(`在 vault 里没找到这篇文章：${vaultPath}`, 10000);
+  }
+
+  private async openInEditor(file: TFile): Promise<void> {
+    try {
+      const leaves = this.app.workspace.getLeavesOfType("markdown");
+      const leaf = leaves.find(item => (item.view as { file?: TFile })?.file === file)
+        ?? leaves[0] ?? this.app.workspace.getLeaf("tab");
+      await leaf.openFile(file);
+      this.plugin.selectArticle(file);
+      this.plugin.refreshPreview();
+    } catch (error) {
+      new Notice(`打开文章失败：${error instanceof Error ? error.message : String(error)}`, 10000);
+    }
   }
 
   private async renderPreview(): Promise<void> {
@@ -392,11 +471,13 @@ export class InloopPreviewView extends ItemView {
     if (!host) return;
 
     const slug = this.plugin.activeSlug();
+    const version = this.renderVersion;
+    const isCurrent = (): boolean => version === this.renderVersion && slug === this.plugin.activeSlug();
     if (!slug) {
       host.empty();
       host.createDiv({
         cls: "inloop-hint",
-        text: "打开一篇 InLoop 文章（内容目录里的 index.md）后，这里会显示预览。",
+        text: this.plugin.articleHint(),
       });
       return;
     }
@@ -414,12 +495,12 @@ export class InloopPreviewView extends ItemView {
     const sourceText = this.readArticleText();
     if (sourceText !== null) {
       const local = contentHash(sourceText);
-      if (local && local === this.previewHash) {
+      if (local && local === this.previewHash && this.plugin.getLastBuild()) {
         // 内容没变：**保留上次的画面**，只把"正在渲染"提示去掉。
         // 清空重画会让预览闪烁，而它其实一个字都没变。
         this.busyEl?.remove();
         this.busyEl = null;
-        this.setStatus("内容未变化", "ok");
+        this.setStatus("预览已更新", "ok");
         return;
       }
     }
@@ -435,11 +516,12 @@ export class InloopPreviewView extends ItemView {
     // 注意：**只有内容真的变了才走到这里**——上一段已用本地哈希挡掉了
     // 无变化的刷新，因此不会为了"看一眼"而起子进程。
     host.empty();
-    this.busyEl = host.createDiv({ cls: "inloop-hint inloop-busy", text: "正在渲染…" });
+    this.setStatus("预览更新中…");
+    this.busyEl = host.createDiv({ cls: "inloop-hint inloop-busy", text: "正在更新预览…" });
     const busy = this.busyEl;
     try {
-      const build = await this.plugin.runRaw(["build-wechat", slug]);
-      const result = build as unknown as BuildResult;
+      const result = await this.plugin.buildCurrent();
+      if (!isCurrent()) return;
       if (result.content_hash) {
         this.previewHash = result.content_hash;
       }
@@ -478,10 +560,16 @@ export class InloopPreviewView extends ItemView {
       // app:// 基址解析而全部失败。（内联成功时用不到，但保留它能让
       // 未内联的图片仍有机会解析。）
       frame.srcdoc = wrapForFrame(inlined.html, frameBaseHref(result.output_dir));
+      this.setStatus("预览已更新", "ok");
     } catch (error) {
+      if (!isCurrent()) return;
       busy.remove();
       const message = error instanceof Error ? error.message : String(error);
+      this.setStatus("预览更新失败", "error");
       host.createDiv({ cls: "inloop-error", text: `预览失败：${message}` });
+    } finally {
+      busy.remove();
+      if (this.busyEl === busy) this.busyEl = null;
     }
   }
 
@@ -492,7 +580,7 @@ export class InloopPreviewView extends ItemView {
 
     const build = this.plugin.getLastBuild();
     if (!build) {
-      host.createDiv({ cls: "inloop-hint", text: "尚未构建。" });
+      host.createDiv({ cls: "inloop-hint", text: "当前文章暂无有效产物。" });
       return;
     }
     host.createDiv({ cls: "inloop-hint", text: `产物目录：${build.output_dir}` });
@@ -613,14 +701,14 @@ export class InloopPreviewView extends ItemView {
 
     const file = this.app.vault.getAbstractFileByPath(vaultPath);
     if (file) {
-      await this.app.workspace.getLeaf().openFile(file as never);
+      await this.openInEditor(file as TFile);
       return;
     }
     // vault 缓存可能还没索引到新文件，等一下再试一次
     await new Promise((resolve) => window.setTimeout(resolve, 400));
     const retry = this.app.vault.getAbstractFileByPath(vaultPath);
     if (retry) {
-      await this.app.workspace.getLeaf().openFile(retry as never);
+      await this.openInEditor(retry as TFile);
       return;
     }
     new Notice(`已创建，但没能在 vault 里定位到：${vaultPath}`, 10000);
@@ -681,4 +769,3 @@ export class InloopPreviewView extends ItemView {
     }
   }
 }
-

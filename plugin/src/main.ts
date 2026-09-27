@@ -9,7 +9,7 @@
  * 3. 构建并复制：一键把正文 HTML 放进剪贴板，去公众号后台粘贴
  */
 
-import { Notice, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
+import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
 import {
   buildArticle,
   checkArticle,
@@ -41,6 +41,10 @@ export default class InloopPlugin extends Plugin {
 
   /** 最近一次构建结果，供"复制到公众号"使用 */
   private lastBuild: BuildResult | null = null;
+  private lastBuildPath = "";
+  private selectedArticle: TFile | null = null;
+  private articleRevision = 0;
+  private buildQueue: Promise<unknown> = Promise.resolve();
 
   /** 是否正在开面板（用于阻断 active-leaf-change 造成的递归开面板） */
   private openingPanel = false;
@@ -111,10 +115,34 @@ export default class InloopPlugin extends Plugin {
         // 多面板时"活动文件"未必是正在编辑的那个，info.file 才是权威来源。
         // （独立审核核对了 MarkdownFileInfo 接口：get file(): TFile | null）
         if (this.isActiveArticle(info.file)) {
+          this.selectArticle(info.file);
+          this.invalidateArticle();
           this.refreshSoon?.();
         }
       }),
     );
+
+    this.registerEvent(this.app.workspace.on("file-open", (file) => {
+      this.selectArticle(file);
+      this.refreshPreview();
+    }));
+    this.registerEvent(this.app.vault.on("modify", (file) => {
+      if (file === this.selectedArticle) {
+        this.invalidateArticle();
+        this.refreshSoon?.();
+      }
+    }));
+    this.registerEvent(this.app.vault.on("rename", () => {
+      this.invalidateArticle();
+      this.refreshPreview();
+    }));
+    this.registerEvent(this.app.vault.on("delete", (file) => {
+      if (file === this.selectedArticle || this.selectedArticle?.path.startsWith(file.path + "/")) {
+        this.selectedArticle = null;
+        this.invalidateArticle();
+        this.refreshPreview();
+      }
+    }));
 
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
@@ -199,43 +227,55 @@ export default class InloopPlugin extends Plugin {
     // 与 Python 在 Windows 上的文件查找一致，重命名为 Index.md 后仍是正文。
     const name = process.platform === "win32" ? file.name.toLowerCase() : file.name;
     if (name !== "index.md") return false;
-    const contentRoot = resolveContentRoot(this.app, this.settings).replace(/\\/g, "/");
+    return this.isArticleLocation(file);
+  }
+
+  private isArticleLocation(file: TFile): boolean {
+    const contentRoot = resolveContentRoot(this.app, this.settings).replace(/\\/g, "/").replace(/\/+$/, "");
     const base = vaultBasePath(this.app);
     if (!base) return false;
     const relative = `${base}/${file.path.replace(/\\/g, "/")}`;
-    return relative.startsWith(contentRoot + "/");
+    return relative.startsWith(contentRoot + "/") &&
+      relative.slice(contentRoot.length + 1).split("/").length === 3;
   }
 
-  /**
-   * 当前打开的文章 slug（目录名），不是文章时返回空串。
-   *
-   * **必须带回退**：`workspace.getActiveFile()` 只在"当前活动的叶子是文件视图"
-   * 时才有值。而本插件的面板里有一堆可点的东西（状态下拉、打开、删除、
-   * 刷新、构建并复制……），**只要用户点一下面板，面板就成了活动叶子，
-   * `getActiveFile()` 立刻返回 null**——于是判定成"当前不是 InLoop 文章"，
-   * 预览与复制全部失效。用户实测的现象就是这个（"打开文章后无法查看预览"，
-   * 而且只在点过面板之后出现，所以感觉是"偶尔"）。
-   *
-   * 回退顺序：
-   * 1. 当前活动的文件（正常情况）
-   * 2. 最近使用过的叶子如果是 Markdown 视图，取它的文件
-   * 3. 遍历所有打开的叶子，找第一个指向内容目录内文章正文的文件
-   */
-  activeSlug(): string {
-    for (const file of this.candidateArticleFiles()) {
-      if (this.isActiveArticle(file)) {
-        return file.parent?.name ?? "";
-      }
+  /** 明确记录选择；面板取得焦点或打开普通笔记时保留当前文章。 */
+  selectArticle(file: TFile | null): void {
+    if (!file || file.extension.toLowerCase() !== "md" || !this.isArticleLocation(file)) return;
+    if (this.selectedArticle !== file) {
+      this.selectedArticle = file;
+      this.invalidateArticle();
     }
-    return "";
   }
 
-  /**
-   * 按可信度列出"用户可能正在编辑的文章文件"。
-   *
-   * 抽成生成器是为了让 :meth:`activeSlug` 与诊断命令用同一套判定，
-   * 避免两处各写一遍、日后改一处漏一处。
-   */
+  private invalidateArticle(): void {
+    this.articleRevision += 1;
+    this.lastBuild = null;
+  }
+
+  currentArticle(): TFile | null {
+    this.selectArticle(this.app.workspace.getActiveFile());
+    if (!this.selectedArticle) {
+      const view = this.app.workspace.getMostRecentLeaf()?.view as { file?: TFile } | undefined;
+      this.selectArticle(view?.file ?? null);
+    }
+    return this.isActiveArticle(this.selectedArticle) ? this.selectedArticle : null;
+  }
+
+  articleHint(): string {
+    this.currentArticle();
+    if (this.selectedArticle && !this.isActiveArticle(this.selectedArticle)) {
+      return `正文入口无法识别：${this.selectedArticle.path}。请将正文恢复为文章目录内的 index.md；修改文章标题请编辑 title 属性。`;
+    }
+    return "点击列表标题或打开文章的 index.md 开始；文章标题在 title 属性中修改。";
+  }
+
+  /** 当前选择的文章目录名；不猜测其他已打开文章。 */
+  activeSlug(): string {
+    return this.currentArticle()?.parent?.name ?? "";
+  }
+
+  /** 仅供诊断列出编辑器文件；操作目标由 selectedArticle 决定。 */
   private *candidateArticleFiles(): Generator<TFile> {
     const seen = new Set<string>();
     const emit = function* (file: TFile | null | undefined): Generator<TFile> {
@@ -252,7 +292,7 @@ export default class InloopPlugin extends Plugin {
     const recentView = recent?.view as { file?: TFile | null } | undefined;
     yield* emit(recentView?.file ?? null);
 
-    // 兜底：任何打开的、位于内容目录里的文章正文
+    // 列出其他打开的正文用于排障，不将其作为操作目标的回退。
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view as { file?: TFile | null };
       yield* emit(view.file ?? null);
@@ -434,14 +474,13 @@ export default class InloopPlugin extends Plugin {
   async buildAndCopy(): Promise<void> {
     const slug = this.activeSlug();
     if (!slug) {
-      new Notice("当前文件不是 InLoop 文章（需要是内容目录里的 index.md）");
+      new Notice(this.articleHint());
       return;
     }
 
     const notice = new Notice("正在构建…", 0);
     try {
-      const result = await buildArticle(this.cliOptions(), slug);
-      this.lastBuild = result;
+      const result = await this.buildCurrent();
 
       const html = readTextFile(result.html_path);
       const body = extractBody(html);
@@ -456,7 +495,7 @@ export default class InloopPlugin extends Plugin {
           : "本文没有正文图片";
 
       if (outcome.wroteHtml) {
-        new Notice(`✓ 已复制正文到剪贴板\n${imageHint}`, 8000);
+        new Notice(`✓ 已复制《${String(result.metadata.title ?? slug)}》正文到剪贴板\n${imageHint}`, 8000);
       } else {
         // 静默降级最糟：用户会以为"工具就这样"，而实际是排版丢了
         new Notice(
@@ -475,7 +514,54 @@ export default class InloopPlugin extends Plugin {
 
   /** 构建结果（面板用来显示图片清单与"打开产物"按钮） */
   getLastBuild(): BuildResult | null {
-    return this.lastBuild;
+    const file = this.currentArticle();
+    return file && file.path === this.lastBuildPath ? this.lastBuild : null;
+  }
+
+  articleVersion(): number {
+    this.currentArticle();
+    return this.articleRevision;
+  }
+
+  /** 所有插件构建共享队列，避免旧 Python 进程后写入同一个产物目录。 */
+  private queueBuild<T>(operation: () => Promise<T>): Promise<T> {
+    const pending = this.buildQueue.then(operation);
+    // 调用方仍收到原始错误；队列尾部恢复，让下一次构建有机会执行。
+    this.buildQueue = pending.catch(() => undefined);
+    return pending;
+  }
+
+  /** 等待编辑器保存，然后绑定目标和版本；旧请求不得成为当前产物。 */
+  private async saveArticle(file: TFile): Promise<void> {
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      if (leaf.view instanceof MarkdownView && leaf.view.file === file) {
+        await leaf.view.save();
+        break;
+      }
+    }
+    if (this.currentArticle() !== file) throw new Error("当前文章已切换，请重试。");
+  }
+
+  async buildCurrent(): Promise<BuildResult> {
+    const file = this.currentArticle();
+    if (!file) throw new Error(this.articleHint());
+    this.lastBuild = null;
+    await this.saveArticle(file);
+    const revision = this.articleRevision;
+    const assertCurrent = (): void => {
+      if (this.currentArticle() !== file || revision !== this.articleRevision) {
+        throw new Error("文章已切换或内容已修改，本次旧构建结果已忽略，请等待预览更新后重试。");
+      }
+    };
+    return this.queueBuild(async () => {
+      assertCurrent();
+      this.lastBuild = null;
+      const result = await buildArticle(this.cliOptions(), file.parent!.name);
+      assertCurrent();
+      this.lastBuild = result;
+      this.lastBuildPath = file.path;
+      return result;
+    });
   }
 
   /** 用系统默认程序打开一个路径（通常是产物的 HTML） */
@@ -489,11 +575,15 @@ export default class InloopPlugin extends Plugin {
 
   /** 校验当前文章，返回可读的问题描述（面板显示用） */
   async checkCurrent(): Promise<string[]> {
-    const slug = this.activeSlug();
-    if (!slug) return [];
-    const result = await checkArticle(this.cliOptions(), slug);
-    const article = result.articles?.[0];
-    if (!article) return [];
+    const file = this.currentArticle();
+    if (!file) throw new Error(this.articleHint());
+    await this.saveArticle(file);
+    const revision = this.articleRevision;
+    const result = await checkArticle(this.cliOptions(), file.parent!.name);
+    if (this.currentArticle() !== file || revision !== this.articleRevision) {
+      throw new Error("文章已切换或修改，请重新校验当前文章。");
+    }
+    const article = result.article;
     return [...article.errors, ...article.warnings].map(
       (issue) => `${issue.code} [${issue.level}] ${issue.message}`,
     );
@@ -521,6 +611,9 @@ export default class InloopPlugin extends Plugin {
 
   /** 直接调用任意 inloop 子命令（面板的"在工具仓库里查看"等场景） */
   async runRaw(args: string[]) {
+    if (args[0] === "build-wechat") {
+      return this.queueBuild(() => runCli(this.cliOptions(), args));
+    }
     return runCli(this.cliOptions(), args);
   }
 }

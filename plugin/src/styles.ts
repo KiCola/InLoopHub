@@ -86,11 +86,22 @@ const CSS = `
 }
 .inloop-article-main { flex: 1; min-width: 0; }
 .inloop-article-title {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.inloop-current { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
+.inloop-validation { margin-bottom: 8px; }
 .inloop-article-meta { font-size: 11px; color: var(--text-muted); }
 .inloop-article-actions { display: flex; gap: 2px; align-items: center; }
 
