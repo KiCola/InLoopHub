@@ -363,6 +363,38 @@ const hostPlugins = [{
   },
 }];
 const pluginModule = await bundle("src/main.ts", "main.cjs", hostPlugins);
+console.log("预览默认定位右侧栏");
+{
+  const plugin = new pluginModule.default();
+  const rightRoot = {};
+  let detached = false;
+  let revealed = null;
+  let created = 0;
+  let existing = [];
+  const old = { getRoot: () => ({}), detach: () => { detached = true; } };
+  const side = { getRoot: () => rightRoot, setViewState: async () => {} };
+  plugin.app = { workspace: {
+    rightSplit: rightRoot,
+    getLeavesOfType: () => existing,
+    getRightLeaf: () => { created += 1; return side; },
+    getMostRecentLeaf: () => { throw new Error("不应创建中间分屏"); },
+    revealLeaf: async leaf => { revealed = leaf; },
+  } };
+  plugin.refreshPreview = () => {};
+  try {
+    await plugin.activatePreview();
+    check("默认在右侧栏新建面板", created === 1 && revealed === side);
+  } catch (error) { check("默认在右侧栏新建面板", false, String(error)); }
+  existing = [old];
+  try {
+    await plugin.activatePreview();
+    check("原中间面板迁到侧栏且只保留一个", detached && revealed === side);
+  } catch (error) { check("原中间面板迁到侧栏且只保留一个", false, String(error)); }
+  existing = [side];
+  const count = created;
+  await plugin.activatePreview();
+  check("再次打开复用右侧栏，不重复创建", created === count);
+}
 console.log("文章重命名后的识别与面板焦点回退");
 {
   const plugin = new pluginModule.default();
@@ -452,20 +484,32 @@ class TestElement {
   allText() { return this.text + this.children.map(c => c.allText()).join(" "); }
 }
 globalThis.createDiv = (options) => new TestElement().createDiv(options);
+const styleModule = await bundle("src/styles.ts", "styles.cjs");
+{
+  const existingStyle = { textContent: "旧插件样式" };
+  globalThis.document = { getElementById: () => existingStyle };
+  styleModule.installStyles();
+  check("重载插件时更新已有样式", existingStyle.textContent !== "旧插件样式");
+  delete globalThis.document;
+}
 const viewModule = await bundle("src/view.ts", "view.cjs", hostPlugins);
 console.log("文章列表操作与异步预览");
 {
   const file = { path: "InLoopContent/2026/002-b/index.md" };
   let opened = null;
   let selected = null;
-  const editorLeaf = { openFile: async (target) => { opened = target; } };
+  const centerRoot = {};
+  const editorLeaf = { getRoot: () => centerRoot, openFile: async (target) => { opened = target; } };
+  const sidebarEditor = { getRoot: () => ({}), openFile: async () => { throw new Error("不能在侧栏编辑文章"); } };
   const app = {
     vault: {
       adapter: { getBasePath: () => "C:/vault" },
       getAbstractFileByPath: () => file,
     },
     workspace: {
-      getLeavesOfType: () => [editorLeaf],
+      rootSplit: centerRoot,
+      getMostRecentLeaf: () => editorLeaf,
+      getLeavesOfType: () => [sidebarEditor, editorLeaf],
       getLeaf: () => { throw new Error("不应将预览面板替换成编辑器"); },
     },
   };
@@ -484,6 +528,10 @@ console.log("文章列表操作与异步预览");
   } catch (error) {
     check("点击文章在编辑叶子打开并选择，保留面板", false, String(error));
   }
+  const sizing = new viewModule.InloopPreviewView({ app: {} }, { settings: { previewWidth: 430 } });
+  sizing.previewEl = new TestElement();
+  sizing.applyPreviewWidth();
+  check("旧的 430px 设置不再限制侧栏预览宽度", sizing.previewEl.style.width === "100%");
 }
 {
   const htmlPath = join(outDir, "preview.html");

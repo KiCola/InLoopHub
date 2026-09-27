@@ -15,6 +15,8 @@ const STYLE_ID = "inloop-notes-styles";
 const CSS = `
 /* 面板整体用纵向布局，让预览区能占据剩余高度而不是被列表挤出去 */
 .inloop-panel {
+  min-width: 0;
+  box-sizing: border-box;
   padding: 8px 10px 20px 10px;
   font-size: 13px;
   display: flex;
@@ -163,8 +165,11 @@ const CSS = `
   font-family: var(--font-monospace);
 }
 
-.inloop-preview-wrap { display: flex; justify-content: center; }
+.inloop-preview-wrap { display: flex; width: 100%; min-width: 0; flex: 0 0 auto; }
 .inloop-preview {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   max-width: 100%;
   border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
@@ -232,9 +237,9 @@ const CSS = `
 
 /** 把样式注入文档；重复调用不会重复插入 */
 export function installStyles(): void {
-  if (document.getElementById(STYLE_ID)) return;
-  const style = document.createElement("style");
+  const existing = document.getElementById(STYLE_ID);
+  const style = existing ?? document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = CSS;
-  document.head.appendChild(style);
+  if (!existing) document.head.appendChild(style);
 }

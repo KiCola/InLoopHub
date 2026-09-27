@@ -83,7 +83,7 @@ export interface InloopSettings {
   repoRoot: string;
   /** 内容目录（放文章的地方）；留空则默认 <vault>/InLoopPub */
   contentRoot: string;
-  /** 正文预览区的宽度（像素），模拟手机阅读宽度 */
+  /** 兼容旧设置文件保留；预览现已自动适应侧栏宽度，不再读取此值 */
   previewWidth: number;
   /** 编辑停止多久后重新渲染（毫秒）。太小会卡，太大会觉得迟钝 */
   previewDebounceMs: number;
@@ -298,18 +298,7 @@ export class InloopSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("预览宽度")
-      .setDesc("模拟手机阅读宽度，公众号正文常用 430px")
-      .addSlider((slider) =>
-        slider
-          .setLimits(320, 600, 10)
-          .setValue(this.plugin.settings.previewWidth)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.previewWidth = value;
-            await this.plugin.saveSettings();
-            this.plugin.refreshPreview();
-          }),
-      );
+      .setDesc("自动适应右侧栏的可用宽度。拖动侧栏边界即可调整，长文章纵向滚动。");
 
     new Setting(containerEl)
       .setName("实时预览延迟")

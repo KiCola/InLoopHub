@@ -9,7 +9,7 @@
  * 3. 构建并复制：一键把正文 HTML 放进剪贴板，去公众号后台粘贴
  */
 
-import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf, debounce } from "obsidian";
+import { MarkdownView, Notice, Plugin, TFile, debounce } from "obsidian";
 import {
   buildArticle,
   checkArticle,
@@ -67,14 +67,14 @@ export default class InloopPlugin extends Plugin {
 
     this.addCommand({
       id: "open-panel",
-      name: "打开面板（左右分屏）",
+      name: "打开面板（右侧栏）",
       callback: () => void this.activatePreview(),
     });
 
     this.addCommand({
       id: "open-panel-sidebar",
-      name: "打开面板（右侧边栏，窄）",
-      callback: () => void this.activatePreview(true),
+      name: "打开右侧栏预览",
+      callback: () => void this.activatePreview(),
     });
 
     this.addCommand({
@@ -151,7 +151,7 @@ export default class InloopPlugin extends Plugin {
         // 不拦住就会递归开出一串面板。这个坑很隐蔽，必须用标记挡住。
         if (this.openingPanel) return;
 
-        // 打开一篇文章时：如果面板还没开，自动开一个（右侧分屏）。
+        // 打开一篇文章时：如果面板还没开，自动在右侧栏打开。
         // 否则用户会看到"打开文章但右侧什么都没有"，以为预览坏了——
         // 而其实只是面板没打开。这是实测反馈过的困惑点。
         const slug = this.activeSlug();
@@ -349,56 +349,24 @@ export default class InloopPlugin extends Plugin {
     new Notice(lines.join("\n"), 30000);
   }
 
-  /**
-   * 打开预览面板。
-   *
-   * **默认开在中间工作区的右侧**（左右分屏），而不是侧边栏——
-   * 用户要的是"左边写文档、右边看预览"，两块都在主工作区里并排，
-   * 预览才有足够的宽度看到真实排版。侧边栏太窄，看排版没有意义。
-   *
-   * Args:
-   *   inSidebar: 为 true 时开在右侧边栏（窄），供只需要"瞄一眼"的场合用。
-   */
-  async activatePreview(inSidebar = false): Promise<void> {
+  /** 在右侧栏打开文章列表与预览，中间工作区保留给编辑器。 */
+  async activatePreview(): Promise<void> {
     // 阻断 active-leaf-change 递归：setViewState 会再次触发那个事件，
     // 而那一刻新叶子还没被注册成预览类型，不拦住就会开出一串面板。
     if (this.openingPanel) return;
     this.openingPanel = true;
     try {
-      await this.openPanel(inSidebar);
+      await this.openPanel();
     } finally {
       this.openingPanel = false;
     }
   }
 
-  private async openPanel(inSidebar: boolean): Promise<void> {
-    const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_INLOOP_PREVIEW);
-
-    // **先清掉多余的重复面板。**
-    // 曾经出现过"文章列表显示两遍"：侧边栏开过一个、分屏又开一个，
-    // 两个同类型视图各渲染一份列表，看起来像列表重复了。
-    // 面板这种东西只该有一个。
-    let leaf: WorkspaceLeaf | null = existing[0] ?? null;
-    for (const duplicate of existing.slice(1)) {
-      duplicate.detach();
-    }
-
-    if (!leaf && inSidebar) {
-      leaf = await this.app.workspace.ensureSideLeaf(VIEW_TYPE_INLOOP_PREVIEW, "right", {
-        active: true,
-        reveal: true,
-      });
-    }
-
-    if (!leaf) {
-      // 在主工作区**右侧分割**出一个新面板。
-      // createLeafBySplit 的方向参数是"新叶子相对源叶子的位置"：
-      // "vertical" = 左右并排（新叶子在右边）。
-      // 源叶子优先取当前活跃的（也就是用户正在写的那篇笔记），
-      // 拿不到时用 getLeaf(false) 兜底——它对无参数与 null 都返回一个叶子。
-      const source = this.app.workspace.getMostRecentLeaf() ?? this.app.workspace.getLeaf(false);
-      leaf = this.app.workspace.createLeafBySplit(source, "vertical", false);
-    }
+  private async openPanel(): Promise<void> {
+    const workspace = this.app.workspace;
+    const existing = workspace.getLeavesOfType(VIEW_TYPE_INLOOP_PREVIEW);
+    const leaf = existing.find(item => item.getRoot() === workspace.rightSplit)
+      ?? workspace.getRightLeaf(false);
 
     if (!leaf) {
       new Notice(
@@ -409,7 +377,11 @@ export default class InloopPlugin extends Plugin {
     }
 
     await leaf.setViewState({ type: VIEW_TYPE_INLOOP_PREVIEW, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    // 新侧栏就绪后才关闭旧的 InLoop 面板，不影响其他插件标签。
+    for (const duplicate of existing) {
+      if (duplicate !== leaf) duplicate.detach();
+    }
+    await workspace.revealLeaf(leaf);
     this.refreshPreview();
   }
 

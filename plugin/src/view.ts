@@ -1,7 +1,7 @@
 /**
  * 文章面板与实时预览视图。
  *
- * 布局：上方是工具栏与文章列表，下方是手机宽度的预览区。
+ * 布局：右侧栏上方是工具栏与文章列表，下方预览随侧栏宽度排版。
  * 编辑文章时预览区会随输入实时更新（防抖在 main.ts 里）。
  */
 
@@ -224,7 +224,7 @@ export class InloopPreviewView extends ItemView {
 
   private applyPreviewWidth(): void {
     if (!this.previewEl) return;
-    this.previewEl.style.width = `${this.plugin.settings.previewWidth}px`;
+    this.previewEl.style.width = "100%";
   }
 
   // --- 渲染 ---------------------------------------------------------------
@@ -455,9 +455,12 @@ export class InloopPreviewView extends ItemView {
 
   private async openInEditor(file: TFile): Promise<void> {
     try {
-      const leaves = this.app.workspace.getLeavesOfType("markdown");
+      const workspace = this.app.workspace;
+      const leaves = workspace.getLeavesOfType("markdown")
+        .filter(item => item.getRoot() === workspace.rootSplit);
+      const recent = workspace.getMostRecentLeaf(workspace.rootSplit);
       const leaf = leaves.find(item => (item.view as { file?: TFile })?.file === file)
-        ?? leaves[0] ?? this.app.workspace.getLeaf("tab");
+        ?? leaves.find(item => item === recent) ?? leaves[0] ?? workspace.getLeaf("tab");
       await leaf.openFile(file);
       this.plugin.selectArticle(file);
       this.plugin.refreshPreview();
