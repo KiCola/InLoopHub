@@ -32,6 +32,7 @@
 
 - `git` 不在 shell 的 PATH 里，完整路径为 `C:\Program Files\Git\cmd\git.exe`，调用时用完整路径。
 - Python 为 `C:\Python313\python.exe`（3.13），`python` 可直接使用。
+- 当前 Codex 受限执行环境中，`.venv/Scripts/python.exe` 导入 `ctypes` 会报 `ImportError: DLL load failed while importing _ctypes: 动态链接库(DLL)初始化例程失败。`（exit 1）；同一虚拟环境在沙箱外导入成功（exit 0）。遇到此错误先申请在沙箱外复测，不据此重建虚拟环境或更换依赖。Python 测试及会启动该虚拟环境的插件冒烟检查需在获准的沙箱外环境执行。
 - **沙箱能力边界**：在受限的工作区写入策略下，MSYS2 系程序（`sh.exe`、`git` 的联网子进程、credential manager）会因无法创建命名对象而崩溃（`NtCreateDirectoryObject ... 0xC0000022`）。
   - 结论：**本地 git 操作（`add` / `commit` / `log` / `status`）在受限策略下可用；`push`、`fetch`、`clone` 需要不受限的执行策略**（已实测：受限时 exit 128，不受限时 exit 0）。
   - 若发现当前策略下无法完成推送，**如实报告并说明如何调整策略**，**不得**静默降级为"跳过推送"并当作已完成。
