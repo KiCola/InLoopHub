@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from html import escape
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
@@ -602,6 +603,7 @@ def render_wechat_html(
     heading_numbers: bool | None = None,
     byline: str = "",
     byline_note: str = "",
+    typography: dict[str, object] | None = None,
 ) -> WechatRenderResult:
     """把规范化后的 HTML 渲染为微信兼容 HTML。
 
@@ -614,6 +616,7 @@ def render_wechat_html(
         heading_numbers: 是否给二级标题自动编号；为 None 时取配置。
         byline: 落款区主行；为空则不渲染落款区。
         byline_note: 落款区副行。
+        typography: 发布排版覆盖；优先于主题，不改变代码字号。
 
     Returns:
         渲染结果。
@@ -622,7 +625,7 @@ def render_wechat_html(
     soup = BeautifulSoup(body_html, "html.parser")
 
     _apply_code_highlighting(soup)
-    _build_figures(soup, config, sheet)
+    captions = _build_figures(soup, config, sheet)
 
     if heading_numbers is None:
         heading_numbers = _config_bool(config, "auto_number_headings", default=False)
@@ -654,6 +657,8 @@ def render_wechat_html(
 
     _force_wechat_safe_attributes(soup)
     _apply_config_overrides(soup, config, sheet)
+    if typography:
+        _apply_publishing_typography(soup, typography, captions)
 
     body = soup.body
     inner = "".join(str(child) for child in body.children) if body else str(soup)
@@ -674,8 +679,10 @@ def render_wechat_html(
     # 在同一个 soup 上既取子节点又挂新容器，追加时会清空取到的内容。
     container_style = sheet.container_declarations()
     container_style.update(resolve_typography(config, sheet)["container"])
+    if typography:
+        container_style.update(_publishing_body_style(typography))
     if container_style:
-        style_attr = to_style_attribute(container_style)
+        style_attr = escape(to_style_attribute(container_style), quote=True)
         return WechatRenderResult(
             html=_restore_code_spaces(
                 f'<{ARTICLE_TAG} style="{style_attr}">{inner}</{ARTICLE_TAG}>'
@@ -692,6 +699,58 @@ def render_wechat_html(
         numbered_headings=numbered,
         has_byline=has_byline,
     )
+
+
+def _publishing_body_style(values: dict[str, object]) -> dict[str, str]:
+    from inloop.typography import FONT_FAMILIES
+
+    style: dict[str, str] = {}
+    if "font_family" in values:
+        style["font-family"] = FONT_FAMILIES[str(values["font_family"])]
+    if "font_size" in values:
+        style["font-size"] = f"{values['font_size']:g}px"
+    if "line_height" in values:
+        style["line-height"] = f"{values['line_height']:g}"
+    return style
+
+
+def _apply_publishing_typography(
+    soup: BeautifulSoup, values: dict[str, object], captions: list[Tag],
+) -> None:
+    from inloop.typography import validate_settings
+
+    validate_settings(values)
+    body_style = _publishing_body_style(values)
+    caption_ids = {id(caption) for caption in captions}
+    for tag in soup.find_all(True):
+        # 代码（含着色 span）和数学降级的 code 保持既有等宽排版。
+        if tag.name in {"pre", "code"} or tag.find_parent(["pre", "code"]):
+            continue
+        style = dict(body_style)
+        heading = tag if tag.name in {"h1", "h2", "h3", "h4", "h5", "h6"} else tag.find_parent(
+            ["h1", "h2", "h3", "h4", "h5", "h6"]
+        )
+        if heading:
+            style.pop("font-size", None)
+            style.pop("line-height", None)
+            if "heading_size" in values:
+                size = max(12, float(values["heading_size"]) - 2 * (int(heading.name[1]) - 1))
+                style["font-size"] = f"{size:g}px"
+        small_tags = ["sup", "sub", "figcaption"]
+        is_caption = id(tag) in caption_ids
+        if is_caption or tag.name in small_tags or tag.find_parent(small_tags):
+            style.pop("font-size", None)
+            style.pop("line-height", None)
+        if tag.name == "p" and not is_caption and "paragraph_spacing" in values:
+            style["margin"] = f"0 0 {values['paragraph_spacing']:g}px 0"
+            existing = str(tag.get("style", ""))
+            tag["style"] = ";".join(
+                part for part in existing.split(";")
+                if part.strip().split(":")[0] not in {
+                    "margin-top", "margin-right", "margin-bottom", "margin-left",
+                }
+            )
+        tag["style"] = merge_styles(str(tag.get("style", "")), style)
 
 
 def merge_styles(existing: str | None, declarations: dict[str, str]) -> str:
@@ -1003,7 +1062,7 @@ def _force_wechat_safe_attributes(soup: BeautifulSoup) -> None:
             del tag["class"]
 
 
-def _build_figures(soup: BeautifulSoup, config: Config, sheet: StyleSheet) -> None:
+def _build_figures(soup: BeautifulSoup, config: Config, sheet: StyleSheet) -> list[Tag]:
     """按图片的 alt/title 生成图片说明。
 
     任务书 §10 要求「可自动生成 caption」。这里优先用 ``title``，
@@ -1013,6 +1072,7 @@ def _build_figures(soup: BeautifulSoup, config: Config, sheet: StyleSheet) -> No
     若指望选择器在产物中生效，图注会悄悄变成普通段落。
     """
     caption_style = sheet.declarations_for_class("p", CAPTION_MARKER)
+    captions: list[Tag] = []
     for image in soup.find_all("img"):
         caption_text = image.get("title") or image.get("alt")
         if not isinstance(caption_text, str) or not caption_text.strip():
@@ -1022,6 +1082,7 @@ def _build_figures(soup: BeautifulSoup, config: Config, sheet: StyleSheet) -> No
             del image["title"]
 
         caption = soup.new_tag("p")
+        captions.append(caption)
         if caption_style:
             caption["style"] = to_style_attribute(caption_style)
         caption.string = caption_text.strip()
@@ -1032,6 +1093,7 @@ def _build_figures(soup: BeautifulSoup, config: Config, sheet: StyleSheet) -> No
             parent.insert_after(caption)
         else:
             image.insert_after(caption)
+    return captions
 
 
 #: 代码块语言 → Pygments lexer 名（仅列常用项，其余交给 Pygments 猜测）

@@ -1113,6 +1113,41 @@ def publish_status() -> None:
         console.print("  凭据在公众号后台「设置与开发 → 基本配置」查看。")
 
 
+@app.command("typography")
+def typography_command(
+    target: str = typer.Argument(..., help="文章目录、index.md 路径或 slug"),
+    settings: str | None = typer.Option(
+        None, "--settings", help="替换所选范围的 JSON 设置；{} 恢复继承",
+    ),
+    global_scope: bool = typer.Option(False, "--global", help="保存为全局默认，未覆盖的文章均生效"),
+) -> None:
+    """读取或保存发布排版；不改变 Markdown 和 Obsidian 编辑字体。"""
+    import json
+
+    from inloop import jsonapi
+    from inloop.typography import TypographyError, read_typography, save_typography
+
+    config = _config_or_fail()
+    content_root = _content_root_or_fail(config)
+    _, article = _load_article_or_fail(config, content_root, target)
+    try:
+        if settings is None:
+            result = read_typography(config.root, content_root, article.id)
+        else:
+            result = save_typography(
+                config.root, content_root, article.id, json.loads(settings),
+                global_scope=global_scope,
+            )
+    except (TypographyError, ValueError) as exc:
+        _fail(str(exc), code="typography_invalid", hint="请修正发布排版设置后重试。")
+        return
+    payload = {"ok": True, "schema": 1, **result}
+    if _json_output():
+        jsonapi.emit(payload)
+    else:
+        console.print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 @app.command("preview-wechat")
 def preview_wechat(
     target: str = typer.Argument(..., help="文章目录、index.md 路径或 slug"),

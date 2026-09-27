@@ -955,6 +955,14 @@ wechat:
 
 ---
 
+发布排版补充（用户确认）：右侧预览提供独立的字体风格、正文与主标题字号、
+行距、段间距设置，不改变 Obsidian 编辑字体或 Markdown 正文。
+`config/publishing-typography.json` 保存本机全局与文章覆盖（不入 Git），
+优先级为文章覆盖 > 全局覆盖 > 主题默认。预览、复制、构建、上传共用。
+CLI `typography <文章>` 读取，`--settings <JSON>` 替换当前文章覆盖，
+`--global` 选择全局范围，空对象恢复继承。主标题 h1 以下每级递减 2px，最低 12px；
+代码与图注字号不随正文覆盖。详情与验收见 `docs/publishing-typography.md`。
+
 ## 21. 技术栈建议
 
 优先 Python。

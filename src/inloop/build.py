@@ -42,6 +42,7 @@ from inloop.renderer.wechat import (
     theme_name,
 )
 from inloop.rendering import RenderOptions, collect_render_options, theme_meta_tag
+from inloop.typography import TypographyError, read_typography
 
 #: 产物根目录名（相对仓库根）。实际位置由 Config.resolve_dist_root() 决定。
 DIST_DIR = "dist"
@@ -181,6 +182,9 @@ def build_article(
     # 5) 加样式：CSS 内联 + 白名单清洗（顺带处理标题编号与落款区）
     active_theme = theme or theme_name(resolved_config)
     try:
+        typography = read_typography(
+            resolved_config.root, resolved_content_root, article.id,
+        )["effective"]
         stylesheet = load_stylesheet(resolved_config, active_theme)
         wechat = render_wechat_html(
             rewritten_html,
@@ -188,8 +192,9 @@ def build_article(
             stylesheet=stylesheet,
             byline=article.byline,
             byline_note=article.byline_note,
+            typography=typography,
         )
-    except StyleError as exc:
+    except (StyleError, TypographyError) as exc:
         raise BuildError(str(exc)) from exc
 
     # 记录本次生效的渲染选项：样式会被不断调整，产物里不留记录就无法复现观感
@@ -213,6 +218,16 @@ def build_article(
         image_manifest=build_image_manifest(assets, content_root=resolved_content_root),
         render_options=render_options,
     )
+    if typography:
+        recorded = metadata["render_options"]
+        recorded["publishing_typography"] = typography
+        for key, target, suffix in (
+            ("font_size", "body_font_size", "px"),
+            ("line_height", "body_line_height", ""),
+            ("paragraph_spacing", "paragraph_spacing", "px"),
+        ):
+            if key in typography:
+                recorded[target] = f"{typography[key]:g}{suffix}"
 
     files: list[Path] = []
     article_html = output_dir / ARTICLE_HTML

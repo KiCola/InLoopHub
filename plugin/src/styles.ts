@@ -13,6 +13,12 @@
 const STYLE_ID = "inloop-notes-styles";
 
 const CSS = `
+.inloop-typography { flex: 0 0 auto; margin: 8px 0; }
+.inloop-typography summary { cursor: pointer; padding: 6px 0; }
+.inloop-typography fieldset { border: 0; padding: 4px 0; min-width: 0; }
+.inloop-type-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.inloop-type-row span { flex: 1 1 120px; }
+.inloop-type-row input, .inloop-type-row select { flex: 1 1 100px; width: 100%; min-width: 0; }
 /* 面板整体用纵向布局，让预览区能占据剩余高度而不是被列表挤出去 */
 .inloop-panel {
   min-width: 0;

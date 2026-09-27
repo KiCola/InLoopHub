@@ -30,6 +30,7 @@ dist/
 content/
 
 # --- 编辑器与系统 ---
+config/publishing-typography.json
 .vscode/
 .idea/
 .DS_Store

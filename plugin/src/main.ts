@@ -36,6 +36,7 @@ import {
 import { VIEW_TYPE_INLOOP_PREVIEW, InloopPreviewView } from "./view";
 import { installStyles } from "./styles";
 import { openWithSystem, copyRichText, readTextFile, vaultBasePath } from "./obsidian-env";
+import type { TypographyResult, TypographySettings } from "./typography-panel";
 
 export default class InloopPlugin extends Plugin {
   settings: InloopSettings = { ...DEFAULT_SETTINGS };
@@ -535,6 +536,27 @@ export default class InloopPlugin extends Plugin {
       this.lastBuildPath = file.path;
       return result;
     });
+  }
+
+  async getTypography(target: string): Promise<TypographyResult> {
+    return runCli<TypographyResult>(this.cliOptions(), ["typography", target], true);
+  }
+
+  async setTypography(target: string, values: TypographySettings, globalScope: boolean): Promise<TypographyResult> {
+    const file = this.currentArticle();
+    if (!file || file.parent?.name !== target) throw new Error("文章已切换，请重新设置发布排版。");
+    this.invalidateArticle();
+    try {
+      return await this.queueBuild(async () => {
+        if (this.currentArticle() !== file) throw new Error("文章已切换，请重新设置发布排版。");
+        return runCli<TypographyResult>(this.cliOptions(), [
+          "typography", target, "--settings", JSON.stringify(values), ...(globalScope ? ["--global"] : []),
+        ], true);
+      });
+    } finally {
+      this.invalidateArticle();
+      this.refreshPreview();
+    }
   }
 
   /** 用系统默认程序打开一个路径（通常是产物的 HTML） */

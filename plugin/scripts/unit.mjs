@@ -481,9 +481,63 @@ class TestElement {
   remove() {}
   hide() {}
   show() {}
+  checkValidity() { return true; }
   allText() { return this.text + this.children.map(c => c.allText()).join(" "); }
 }
 globalThis.createDiv = (options) => new TestElement().createDiv(options);
+console.log("发布排版表单");
+{
+  const module = await bundle("src/typography-panel.ts", "typography-panel.cjs");
+  const host = new TestElement();
+  let selected = "a";
+  const writes = [];
+  let rejectSave = false;
+  const settings = { global: { font_size: 16 }, article: {}, effective: { font_size: 16 },
+    fonts: { system: "系统默认", serif: "衬线" },
+    fields: { font_size: { min: 12, max: 24, step: 1, label: "正文字号（px）" } } };
+  const panel = new module.TypographyPanel(host, {
+    load: async () => settings,
+    save: async (target, values, globalScope) => {
+      if (rejectSave) throw new Error("保存失败测试");
+      writes.push({ target, values, globalScope });
+      return settings;
+    },
+  });
+  await panel.update(selected);
+  panel.details.open = true;
+  await panel.load();
+  const input = panel.inputs.get("font_size");
+  check("默认当前文章且空值继承", input.value === "" && panel.scope === "article");
+  input.value = "19";
+  await panel.apply(false);
+  check("文章覆盖保存到所选文章", writes[0].target === "a" && writes[0].values.font_size === 19 && !writes[0].globalScope);
+  selected = "b";
+  await panel.update(selected);
+  check("切换文章清除未应用输入", panel.inputs.get("font_size").value === "");
+  panel.scope = "global";
+  await panel.apply(true);
+  check("恢复全局继承只提交空覆盖", writes[1].globalScope && Object.keys(writes[1].values).length === 0);
+  rejectSave = true;
+  await panel.apply(false);
+  check("保存失败显示原因", host.allText().includes("保存失败测试"));
+  panel.scope = "article";
+  panel.render();
+  panel.inputs.get("font_size").value = "21";
+  let finishSave;
+  panel.actions.save = () => new Promise(resolve => { finishSave = resolve; });
+  const saving = panel.apply(false);
+  await panel.load();
+  finishSave({ ...settings, article: { font_size: 21 } });
+  await saving;
+  check("保存时重新展开不会读回旧设置", panel.inputs.get("font_size").value === "21");
+  let finish;
+  panel.actions.load = () => new Promise(resolve => { finish = resolve; });
+  const pending = panel.update("c");
+  await panel.update("");
+  finish(settings);
+  await pending;
+  check("迟到的文章设置不能覆盖未选择状态", host.allText().includes("请先选择文章") && panel.inputs.size === 0);
+}
 const styleModule = await bundle("src/styles.ts", "styles.cjs");
 {
   const existingStyle = { textContent: "旧插件样式" };
@@ -609,7 +663,7 @@ const buildModule = await bundle("src/main.ts", "build-main.cjs", [...hostPlugin
         export const createArticle = () => {};
         export const deleteArticle = () => {};
         export const listArticles = () => {};
-        export const runCli = () => {};
+        export const runCli = (...args) => globalThis.rawStub(...args);
         export const setStatus = () => {};
         export const guessExecutable = () => {};
         export const STATUSES = [];`,
@@ -715,6 +769,36 @@ console.log("保存与构建版本绑定");
   await first;
   const secondResult = await second;
   check("同版本排队重建失败不遗留前一次产物", secondResult instanceof Error && plugin.getLastBuild() === null);
+  let refreshes = 0;
+  let writes = 0;
+  plugin.refreshPreview = () => { refreshes += 1; };
+  globalThis.rawStub = async (_options, args) => {
+    writes += 1;
+    check("排版以结构化 JSON 参数提交且保留目标", args[0] === "typography" && args[1] === "001-a"
+      && JSON.parse(args[3]).font_size === 20 && args.includes("--global"));
+    return { ok: true, schema: 1 };
+  };
+  let releaseBuild;
+  let signalBuild;
+  const buildStarted = new Promise(resolve => { signalBuild = resolve; });
+  globalThis.buildStub = async () => {
+    signalBuild();
+    await new Promise(resolve => { releaseBuild = resolve; });
+    return output;
+  };
+  const obsolete = plugin.buildCurrent().catch(error => error);
+  await buildStarted;
+  const savedType = plugin.setTypography("001-a", { font_size: 20 }, true);
+  await new Promise(resolve => setImmediate(resolve));
+  check("排版保存等待已有构建且立即失效旧产物", writes === 0 && plugin.getLastBuild() === null);
+  releaseBuild();
+  const discarded = await obsolete;
+  await savedType;
+  check("排版变更拒收旧构建并触发预览刷新", discarded instanceof Error && writes === 1 && refreshes === 1);
+  active = b;
+  let staleRejected = false;
+  try { await plugin.setTypography("001-a", { font_size: 18 }, false); } catch { staleRejected = true; }
+  check("切换文章后旧表单不能写入", staleRejected && writes === 1);
 }
 
 rmSync(outDir, { recursive: true, force: true });

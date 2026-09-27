@@ -9,6 +9,7 @@ import { ItemView, Notice, WorkspaceLeaf, setIcon, type TFile } from "obsidian";
 import type InloopPlugin from "./main";
 import type { ArticleSummary, BuildResult, ImageEntry, IssueInfo } from "./inloop/cli";
 import { STATUSES } from "./inloop/cli";
+import { TypographyPanel } from "./typography-panel";
 import { contentHash, contentPathToVault, readBinaryFile, readTextFile } from "./obsidian-env";
 import {
   FRAME_SANDBOX,
@@ -62,6 +63,7 @@ export class InloopPreviewView extends ItemView {
   private currentPath = "";
   private renderVersion = 0;
   private articleVersion = -1;
+  private typographyPanel: TypographyPanel | null = null;
 
   /** 是否有渲染正在进行（防止并发渲染把同一份列表追加两遍） */
   private rendering = false;
@@ -216,6 +218,10 @@ export class InloopPreviewView extends ItemView {
     this.articleButtons.push(openInBrowser);
 
     this.buildEl = root.createDiv({ cls: "inloop-build" });
+    this.typographyPanel = new TypographyPanel(root, {
+      load: target => this.plugin.getTypography(target),
+      save: (target, values, globalScope) => this.plugin.setTypography(target, values, globalScope),
+    });
 
     const previewWrap = root.createDiv({ cls: "inloop-preview-wrap" });
     this.previewEl = previewWrap.createDiv({ cls: "inloop-preview" });
@@ -270,6 +276,7 @@ export class InloopPreviewView extends ItemView {
 
   private renderCurrentArticle(): void {
     const file = this.plugin.currentArticle();
+    void this.typographyPanel?.update(file?.parent?.name ?? "");
     const path = file?.path ?? "";
     const revision = this.plugin.articleVersion();
     if (revision !== this.articleVersion) {
