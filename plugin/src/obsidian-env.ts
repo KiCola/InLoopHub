@@ -28,12 +28,79 @@ export function vaultBasePath(app: App): string {
   return (adapter.getBasePath() ?? "").replace(/\\/g, "/");
 }
 
-/** 把绝对路径转成 vault 内的相对路径；不在 vault 内时返回 null */
-export function toVaultPath(app: App, absolutePath: string): string | null {
+/**
+ * 把"内容目录 + 相对路径"折算成 vault 内路径；判不出来时返回 null。
+ *
+ * 直接前缀匹配之外还做一次**目录联接回退**：内容目录常常是用目录联接接进
+ * vault 的（本机是 `TechTree/InLoopContent` → `E:/InLoopHub/content`），
+ * 而 Python 侧会**解引用联接**、报告真实路径。那个路径不以 vault 根开头，
+ * 但它在 vault 里其实有对应位置（联接点）。
+ *
+ * 两种回退，按可靠性排序：
+ *
+ * 1. **按真实位置比对**：请 Obsidian 解析 vault 根下各目录的真实路径，
+ *    与内容目录相等的那一个就是联接点。这最可靠——因为联接点的**名字
+ *    可以与目标目录不同**（`InLoopContent` → `content`），靠名字猜不出来。
+ * 2. 名字相同的情况：末段目录名在 vault 里存在就直接用。
+ *
+ * 都判不出来时返回 null，由调用方给出"用目录联接接进来"的可操作指引。
+ *
+ * @param contentRoot 内容目录（绝对路径，可能指向 vault 之外）
+ * @param relativeHint 内容目录内、相对它的路径（可为空）
+ */
+export function contentPathToVault(
+  app: App,
+  contentRoot: string,
+  relativeHint = "",
+): string | null {
   const base = vaultBasePath(app);
-  const normalized = absolutePath.replace(/\\/g, "/");
-  if (!base || !normalized.startsWith(base + "/")) return null;
-  return normalized.slice(base.length + 1);
+  if (!base) return null;
+
+  const root = contentRoot.replace(/\\/g, "/").replace(/\/+$/, "");
+  const hint = relativeHint.replace(/\\/g, "/").replace(/^\/+/, "");
+  const join = (prefix: string, rest: string): string => (rest ? `${prefix}/${rest}` : prefix);
+
+  // 情况一：内容目录本身就在 vault 内（含通过联接接进来的写法）
+  if (root.startsWith(base + "/")) {
+    return join(root.slice(base.length + 1), hint);
+  }
+
+  // 情况二：内容目录是 vault 之外的真实路径（Python 解引用了联接）。
+  const adapter = app.vault.adapter as unknown as {
+    realpath?: (path: string) => string;
+    getFullPath?: (path: string) => string;
+  };
+
+  for (const entry of vaultRootDirectories(app)) {
+    // 2.1 按真实位置比对：联接点的名字可能与目标不同，只有比对真实路径才认得出
+    if (typeof adapter.realpath === "function") {
+      try {
+        const real = adapter.realpath(entry).replace(/\\/g, "/").replace(/\/+$/, "");
+        if (real && real === root) {
+          return join(entry, hint);
+        }
+      } catch {
+        // 单个条目解析失败不影响其他条目
+      }
+    }
+    // 2.2 退一步：名字恰好相同（没接联接、只是目录同名）
+    if (entry === root.split("/").filter(Boolean).pop()) {
+      return join(entry, hint);
+    }
+  }
+  return null;
+}
+
+/** 列出 vault 根下的目录名（只取第一层，联接点都在这一层） */
+function vaultRootDirectories(app: App): string[] {
+  const root = app.vault.getRoot() as unknown as {
+    children?: { name: string; children?: unknown }[];
+  };
+  const children = root?.children;
+  if (!Array.isArray(children)) return [];
+  return children
+    .filter((child) => Array.isArray(child.children))
+    .map((child) => child.name);
 }
 
 /**

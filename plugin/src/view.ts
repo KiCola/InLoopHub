@@ -9,7 +9,7 @@ import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type InloopPlugin from "./main";
 import type { ArticleSummary, BuildResult, ImageEntry } from "./inloop/cli";
 import { STATUSES } from "./inloop/cli";
-import { contentHash, readBinaryFile, readTextFile, toVaultPath } from "./obsidian-env";
+import { contentHash, contentPathToVault, readBinaryFile, readTextFile } from "./obsidian-env";
 import {
   FRAME_SANDBOX,
   extractBodyHtml,
@@ -358,30 +358,33 @@ export class InloopPreviewView extends ItemView {
       select.value = article.status;
     }
   }
+  /**
+   * 打开一篇文章。
+   *
+   * **关键：把"内容目录 + 相对路径"折算成 vault 内路径，而不是直接拼绝对路径。**
+   *
+   * 不能拿内容目录的绝对路径去拼：内容目录可能是接进 vault 的**目录联接**
+   * （本机就是 `TechTree/InLoopContent` → `E:/InLoopHub/content`），
+   * 而 Python 侧会**解引用联接**、报告真实路径 `E:/InLoopHub/content`。
+   * 那个路径在 vault 之外，于是判定"不在 vault 内"、文章打不开，
+   * 用户看到的现象就是"点文章没反应、也就没法预览"。
+   *
+   * `article.path` 是**相对内容目录**的，所以交给
+   * :func:`contentPathToVault` 一起折算即可（它会处理联接回退）。
+   */
   private async openArticle(article: ArticleSummary): Promise<void> {
-    const contentRoot = await this.contentRootFromCli();
-    const absolute = `${contentRoot}/${article.path}`;
-    const vaultPath = toVaultPath(this.app, absolute);
-    if (!vaultPath) {
-      this.noticeOutOfVault(absolute);
+    const contentRoot = this.plugin.cliOptions().contentRoot ?? "";
+    const vaultPath = contentPathToVault(this.app, contentRoot, article.path);
+    if (vaultPath === null) {
+      this.noticeOutOfVault(`${contentRoot.replace(/\\/g, "/")}/${article.path}`);
       return;
     }
     const file = this.app.vault.getAbstractFileByPath(vaultPath);
     if (file) {
       await this.app.workspace.getLeaf().openFile(file as never);
-    } else {
-      new Notice(`找不到文件：${vaultPath}`);
+      return;
     }
-  }
-
-  /** 从一次 list 调用里拿内容目录（保证与 Python 侧解析结果一致） */
-  private async contentRootFromCli(): Promise<string> {
-    try {
-      const list = await this.plugin.listArticlesSafe();
-      return list.content_root.replace(/\\/g, "/");
-    } catch {
-      return this.plugin.cliOptions().contentRoot?.replace(/\\/g, "/") ?? "";
-    }
+    new Notice(`在 vault 里没找到这篇文章：${vaultPath}`, 10000);
   }
 
   private async renderPreview(): Promise<void> {
@@ -599,12 +602,12 @@ export class InloopPreviewView extends ItemView {
    * 最实用的做法是用目录联接把内容目录接进 vault（见 plugin/README.md）。
    */
   private async openCreated(contentRoot: string, relativePath: string): Promise<void> {
-    const base = (contentRoot || "").replace(/\\/g, "/").replace(/\/+$/, "");
-    const absolute = base ? `${base}/${relativePath}` : relativePath;
-    const vaultPath = toVaultPath(this.app, absolute);
+    // 与 openArticle 用同一套折算：内容目录可能是接进 vault 的目录联接，
+    // 而 Python 报的是解引用后的真实路径（见 contentPathToVault 的说明）。
+    const vaultPath = contentPathToVault(this.app, contentRoot, relativePath);
 
-    if (!vaultPath) {
-      this.noticeOutOfVault(absolute);
+    if (vaultPath === null) {
+      this.noticeOutOfVault(`${contentRoot.replace(/\\/g, "/")}/${relativePath}`);
       return;
     }
 

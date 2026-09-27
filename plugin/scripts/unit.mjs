@@ -275,6 +275,72 @@ console.log("contentHash（必须与 Python 的 inloop.build.content_hash 一致
   );
 }
 
+console.log("");
+console.log("contentPathToVault（内容目录可能是接进 vault 的目录联接）");
+{
+  const env = await bundle("src/obsidian-env.ts", "env-path.cjs");
+
+  // 造一个最小 app：vault 根 + 若干根目录 + 模拟"联接点解析真实路径"
+  const VAULT = "C:/Users/zzr/Nutstore/1/我的坚果云/obsidian/TechTree";
+  const app = {
+    vault: {
+      adapter: {
+        getBasePath: () => "C:\\Users\\zzr\\Nutstore\\1\\我的坚果云\\obsidian\\TechTree",
+        // 模拟真实的目录联接：InLoopContent 的真实位置是 E:/InLoopHub/content
+        realpath: (p) =>
+          p === "InLoopContent"
+            ? "E:\\InLoopHub\\content"
+            : `C:\\Users\\zzr\\Nutstore\\1\\我的坚果云\\obsidian\\TechTree\\${p}`,
+      },
+      getRoot: () => ({
+        children: [
+          { name: "InLoopContent", children: [] },
+          { name: "InLoopPub", children: [] },
+          { name: "研究卡片", children: [] },
+          { name: "某篇笔记.md" }, // 文件没有 children，应被过滤
+        ],
+      }),
+      getAbstractFileByPath: (p) => (p ? { path: p } : null),
+    },
+  };
+
+  check(
+    "内容目录在 vault 内：直接算相对路径",
+    env.contentPathToVault(app, `${VAULT}/InLoopContent`, "2026/002-try/index.md") ===
+      "InLoopContent/2026/002-try/index.md",
+    env.contentPathToVault(app, `${VAULT}/InLoopContent`, "2026/002-try/index.md"),
+  );
+
+  // 这是本机真实情况：Python 解引用了联接，报的是 vault 外的真实路径
+  check(
+    "内容目录是 vault 外真实路径：按末段名字找回联接点",
+    env.contentPathToVault(app, "E:/InLoopHub/content", "2026/002-try/index.md") ===
+      "InLoopContent/2026/002-try/index.md",
+    env.contentPathToVault(app, "E:/InLoopHub/content", "2026/002-try/index.md"),
+  );
+
+  check(
+    "反斜杠与尾斜杠都能处理",
+    env.contentPathToVault(
+      app,
+      "C:\\Users\\zzr\\Nutstore\\1\\我的坚果云\\obsidian\\TechTree\\InLoopContent\\",
+      "2026/x/index.md",
+    ) === "InLoopContent/2026/x/index.md",
+  );
+
+  check(
+    "不给相对路径时只返回目录",
+    env.contentPathToVault(app, `${VAULT}/InLoopPub`) === "InLoopPub",
+    env.contentPathToVault(app, `${VAULT}/InLoopPub`),
+  );
+
+  check(
+    "vault 外且找不到同名目录 → null（由调用方给出指引）",
+    env.contentPathToVault(app, "D:/somewhere/else", "a/index.md") === null,
+    String(env.contentPathToVault(app, "D:/somewhere/else", "a/index.md")),
+  );
+}
+
 rmSync(outDir, { recursive: true, force: true });
 
 console.log("");
