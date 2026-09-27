@@ -34,7 +34,7 @@ function check(label, ok, detail = "") {
 }
 
 /** 把某个源文件单独打包成可在 Node 里 import 的模块（宿主模块保持外部） */
-async function bundle(entry, name) {
+async function bundle(entry, name, plugins = []) {
   const target = join(outDir, name);
   await build({
     entryPoints: [join(root, entry)],
@@ -49,6 +49,7 @@ async function bundle(entry, name) {
     // obsidian 与 electron 都由宿主提供，不进 bundle
     external: ["obsidian", "electron"],
     logLevel: "error",
+    plugins,
   });
   // CJS 用 createRequire 载入，import() 也能拿到 default
   const loaded = await import(`file://${target.replace(/\\/g, "/")}`);
@@ -339,6 +340,56 @@ console.log("contentPathToVault（内容目录可能是接进 vault 的目录联
     env.contentPathToVault(app, "D:/somewhere/else", "a/index.md") === null,
     String(env.contentPathToVault(app, "D:/somewhere/else", "a/index.md")),
   );
+}
+
+// 只替代宿主提供的类；文章识别与活动文件回退运行插件的真实实现。
+const pluginModule = await bundle("src/main.ts", "main.cjs", [{
+  name: "obsidian-test-host",
+  setup(builder) {
+    builder.onResolve({ filter: /^obsidian$/ }, () => ({ path: "obsidian", namespace: "test-host" }));
+    builder.onLoad({ filter: /.*/, namespace: "test-host" }, () => ({
+      contents: `export class Plugin {}
+        export class PluginSettingTab {}
+        export class ItemView {}
+        export class TFile {}
+        export class Notice {}
+        export class Setting {}
+        export const normalizePath = p => p;
+        export const debounce = fn => fn;
+        export const setIcon = () => {};`,
+      loader: "js",
+    }));
+  },
+}]);
+console.log("文章重命名后的识别与面板焦点回退");
+{
+  const plugin = new pluginModule.default();
+  const file = {
+    name: "index.md", extension: "md",
+    path: "InLoopContent/2026/004-gpt6/index.md", parent: { name: "004-gpt6" },
+  };
+  let activeFile = file;
+  plugin.settings.contentRoot = "C:/vault/InLoopContent";
+  plugin.app = {
+    vault: { adapter: { getBasePath: () => "C:/vault" } },
+    workspace: {
+      getActiveFile: () => activeFile,
+      getMostRecentLeaf: () => ({ view: {} }),
+      getLeavesOfType: () => [{ view: { file } }],
+    },
+  };
+  check("小写正文可选中", plugin.activeSlug() === "004-gpt6");
+  file.name = "GPT6.md";
+  file.path = "InLoopContent/2026/004-gpt6/GPT6.md";
+  check("任意文件名不作为正文入口", plugin.activeSlug() === "");
+  file.name = "Index.md";
+  file.path = "InLoopContent/2026/004-gpt6/Index.md";
+  check("Windows 改回 Index.md 后恢复选中", plugin.activeSlug() === (process.platform === "win32" ? "004-gpt6" : ""));
+  activeFile = null;
+  check("点击面板后仍找到 Index.md 正文", plugin.activeSlug() === (process.platform === "win32" ? "004-gpt6" : ""));
+  file.name = "index.md";
+  file.path = "Other/2026/004-gpt6/index.md";
+  check("内容目录外的正文不被识别", plugin.activeSlug() === "");
 }
 
 rmSync(outDir, { recursive: true, force: true });

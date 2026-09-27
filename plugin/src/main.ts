@@ -195,7 +195,10 @@ export default class InloopPlugin extends Plugin {
    * 不会触发无意义的渲染。
    */
   isActiveArticle(file: TFile | null): boolean {
-    if (!file || file.extension !== "md" || file.name !== "index.md") return false;
+    if (!file) return false;
+    // 与 Python 在 Windows 上的文件查找一致，重命名为 Index.md 后仍是正文。
+    const name = process.platform === "win32" ? file.name.toLowerCase() : file.name;
+    if (name !== "index.md") return false;
     const contentRoot = resolveContentRoot(this.app, this.settings).replace(/\\/g, "/");
     const base = vaultBasePath(this.app);
     if (!base) return false;
