@@ -42,6 +42,9 @@ export default class InloopPlugin extends Plugin {
   /** 最近一次构建结果，供"复制到公众号"使用 */
   private lastBuild: BuildResult | null = null;
 
+  /** 是否正在开面板（用于阻断 active-leaf-change 造成的递归开面板） */
+  private openingPanel = false;
+
   /** 防抖后的预览刷新：打字时不至于每个字符都触发一次 Python 调用 */
   private refreshSoon: (() => void) | null = null;
 
@@ -68,6 +71,12 @@ export default class InloopPlugin extends Plugin {
       id: "open-panel-sidebar",
       name: "打开面板（右侧边栏，窄）",
       callback: () => void this.activatePreview(true),
+    });
+
+    this.addCommand({
+      id: "diagnose-paths",
+      name: "诊断：路径与预览判定",
+      callback: () => this.diagnosePaths(),
     });
 
     this.addCommand({
@@ -109,6 +118,19 @@ export default class InloopPlugin extends Plugin {
 
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
+        // 正在开面板时直接返回：`activatePreview` 内部的 setViewState 会再次触发
+        // 本事件，而那一刻新叶子还没被注册成预览类型——
+        // 不拦住就会递归开出一串面板。这个坑很隐蔽，必须用标记挡住。
+        if (this.openingPanel) return;
+
+        // 打开一篇文章时：如果面板还没开，自动开一个（右侧分屏）。
+        // 否则用户会看到"打开文章但右侧什么都没有"，以为预览坏了——
+        // 而其实只是面板没打开。这是实测反馈过的困惑点。
+        const slug = this.activeSlug();
+        if (slug && this.app.workspace.getLeavesOfType(VIEW_TYPE_INLOOP_PREVIEW).length === 0) {
+          void this.activatePreview();
+          return;
+        }
         this.refreshPreview();
       }),
     );
@@ -181,14 +203,108 @@ export default class InloopPlugin extends Plugin {
     return relative.startsWith(contentRoot + "/");
   }
 
-  /** 当前打开的文章 slug（目录名），不是文章时返回空串 */
+  /**
+   * 当前打开的文章 slug（目录名），不是文章时返回空串。
+   *
+   * **必须带回退**：`workspace.getActiveFile()` 只在"当前活动的叶子是文件视图"
+   * 时才有值。而本插件的面板里有一堆可点的东西（状态下拉、打开、删除、
+   * 刷新、构建并复制……），**只要用户点一下面板，面板就成了活动叶子，
+   * `getActiveFile()` 立刻返回 null**——于是判定成"当前不是 InLoop 文章"，
+   * 预览与复制全部失效。用户实测的现象就是这个（"打开文章后无法查看预览"，
+   * 而且只在点过面板之后出现，所以感觉是"偶尔"）。
+   *
+   * 回退顺序：
+   * 1. 当前活动的文件（正常情况）
+   * 2. 最近使用过的叶子如果是 Markdown 视图，取它的文件
+   * 3. 遍历所有打开的叶子，找第一个指向内容目录内文章正文的文件
+   */
   activeSlug(): string {
-    const file = this.app.workspace.getActiveFile();
-    if (!this.isActiveArticle(file) || !file) return "";
-    return file.parent?.name ?? "";
+    for (const file of this.candidateArticleFiles()) {
+      if (this.isActiveArticle(file)) {
+        return file.parent?.name ?? "";
+      }
+    }
+    return "";
+  }
+
+  /**
+   * 按可信度列出"用户可能正在编辑的文章文件"。
+   *
+   * 抽成生成器是为了让 :meth:`activeSlug` 与诊断命令用同一套判定，
+   * 避免两处各写一遍、日后改一处漏一处。
+   */
+  private *candidateArticleFiles(): Generator<TFile> {
+    const seen = new Set<string>();
+    const emit = function* (file: TFile | null | undefined): Generator<TFile> {
+      if (file && !seen.has(file.path)) {
+        seen.add(file.path);
+        yield file;
+      }
+    };
+
+    yield* emit(this.app.workspace.getActiveFile());
+
+    // 最近使用过的叶子（例如用户刚在笔记里写完，又点了预览面板）
+    const recent = this.app.workspace.getMostRecentLeaf();
+    const recentView = recent?.view as { file?: TFile | null } | undefined;
+    yield* emit(recentView?.file ?? null);
+
+    // 兜底：任何打开的、位于内容目录里的文章正文
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view as { file?: TFile | null };
+      yield* emit(view.file ?? null);
+    }
   }
 
   // --- 预览 ---------------------------------------------------------------
+
+  /**
+   * 诊断：把"预览判定"用到的每个路径都打出来。
+   *
+   * 为什么需要它：`isActiveArticle` 返回 false 会让预览、构建、复制全部失效，
+   * 但它不报错、只是安静地判定"这不是文章"。而失败的可能是配置、vault 路径、
+   * 大小写、分隔符中的任何一个，**靠读代码猜不出来**。
+   * 这个命令把实际值摆出来，一次就能定位。
+   */
+  diagnosePaths(): void {
+    const file = this.app.workspace.getActiveFile();
+    const base = vaultBasePath(this.app);
+    const contentRoot = resolveContentRoot(this.app, this.settings).replace(/\\/g, "/");
+    // 当前文件拼成绝对路径后的样子：用来肉眼核对"前缀判断"为什么成立或不成立
+    const absolute = `${base}/${(file?.path ?? "").replace(/\\/g, "/")}`;
+
+    const lines = [
+      "【当前文件】",
+      `  名称：${file?.name ?? "（没有打开文件）"}`,
+      `  扩展名：${file?.extension ?? "-"}`,
+      `  vault 内路径：${file?.path ?? "-"}`,
+      `  拼成绝对路径：${absolute}`,
+      `  以内容目录开头：${absolute.startsWith(contentRoot + "/")}`,
+      "",
+      "【vault 根】",
+      `  ${base || "（取不到）"}`,
+      "",
+      "【设置里的内容目录】",
+      `  ${resolveContentRoot(this.app, this.settings) || "（空）"}`,
+      `  规范化后：${contentRoot}`,
+      "",
+      "【候选文件（按可信度）】",
+      ...[...this.candidateArticleFiles()].map(
+        (candidate, index) =>
+          `  ${index + 1}. ${candidate.path}  → ${
+            this.isActiveArticle(candidate) ? "是文章" : "不是文章"
+          }`,
+      ),
+      "",
+      "【结论】",
+      `  isActiveArticle(当前文件) = ${this.isActiveArticle(file)}`,
+      `  activeSlug = ${this.activeSlug() || "（空，预览不会渲染）"}`,
+    ];
+
+    // 用 Notice 放不下这么多行，同时打印到控制台并弹窗给关键几行
+    for (const line of lines) console.log(`[InLoop 诊断] ${line}`);
+    new Notice(lines.join("\n"), 30000);
+  }
 
   /**
    * 打开预览面板。
@@ -201,6 +317,18 @@ export default class InloopPlugin extends Plugin {
    *   inSidebar: 为 true 时开在右侧边栏（窄），供只需要"瞄一眼"的场合用。
    */
   async activatePreview(inSidebar = false): Promise<void> {
+    // 阻断 active-leaf-change 递归：setViewState 会再次触发那个事件，
+    // 而那一刻新叶子还没被注册成预览类型，不拦住就会开出一串面板。
+    if (this.openingPanel) return;
+    this.openingPanel = true;
+    try {
+      await this.openPanel(inSidebar);
+    } finally {
+      this.openingPanel = false;
+    }
+  }
+
+  private async openPanel(inSidebar: boolean): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_INLOOP_PREVIEW);
 
     // **先清掉多余的重复面板。**
