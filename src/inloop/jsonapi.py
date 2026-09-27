@@ -281,6 +281,9 @@ def build_payload(outcome: object, *, content_root: Path) -> dict[str, Any]:
         "schema": SCHEMA_VERSION,
         "content_root": content_root.as_posix(),
         "output_dir": outcome.output_dir.as_posix(),
+        # 正文哈希：调用方据此跳过"内容没变"的重复构建
+        # （实时预览每次按键都会问一次，不做这个判断等于每 400ms 起一个进程）
+        "content_hash": outcome.content_hash,
         "files": [p.as_posix() for p in outcome.files],
         "html_path": (outcome.output_dir / "article.html").as_posix(),
         "preview_path": (outcome.output_dir / "article.preview.html").as_posix(),

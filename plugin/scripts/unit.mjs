@@ -33,17 +33,29 @@ function check(label, ok, detail = "") {
   }
 }
 
-const outfile = join(outDir, "preview-utils.mjs");
-await build({
-  entryPoints: [join(root, "src/preview-utils.ts")],
-  outfile,
-  bundle: true,
-  format: "esm",
-  platform: "node",
-  target: "node22",
-  logLevel: "error",
-});
-const utils = await import(`file://${outfile.replace(/\\/g, "/")}`);
+/** 把某个源文件单独打包成可在 Node 里 import 的模块（宿主模块保持外部） */
+async function bundle(entry, name) {
+  const target = join(outDir, name);
+  await build({
+    entryPoints: [join(root, entry)],
+    outfile: target,
+    bundle: true,
+    // **用 CommonJS**：源码里有 `require("node:crypto")` 这类调用，
+    // 而 esbuild 在 ESM 输出下会把 require 变成"动态 require 不支持"。
+    // 插件真实产物也是 CJS，保持一致才测的是同一条路径。
+    format: "cjs",
+    platform: "node",
+    target: "node22",
+    // obsidian 与 electron 都由宿主提供，不进 bundle
+    external: ["obsidian", "electron"],
+    logLevel: "error",
+  });
+  // CJS 用 createRequire 载入，import() 也能拿到 default
+  const loaded = await import(`file://${target.replace(/\\/g, "/")}`);
+  return loaded.default ?? loaded;
+}
+
+const utils = await bundle("src/preview-utils.ts", "preview-utils.cjs");
 
 console.log("纯函数单测（预览与剪贴板）");
 console.log("");
@@ -240,6 +252,27 @@ console.log("mimeForPath");
   for (const [name, expected] of cases) {
     check(`${name} → ${expected}`, utils.mimeForPath(name) === expected, utils.mimeForPath(name));
   }
+}
+
+console.log("");
+console.log("contentHash（必须与 Python 的 inloop.build.content_hash 一致）");
+{
+  // contentHash 在 obsidian-env.ts 里（它要用 node:crypto），单独打包
+  const env = await bundle("src/obsidian-env.ts", "env-hash.cjs");
+  check("空串的哈希长度是 16", env.contentHash("").length === 16, env.contentHash(""));
+  check("同一输入结果稳定", env.contentHash("abc") === env.contentHash("abc"));
+  check("不同输入结果不同", env.contentHash("abc") !== env.contentHash("abd"));
+  // SHA-256("") 的前 16 位，用定义值校验实现没写错
+  check(
+    "空串哈希与 SHA-256 定义一致",
+    env.contentHash("") === "e3b0c44298fc1c14",
+    env.contentHash(""),
+  );
+  check(
+    "中文内容也能算出 16 位十六进制",
+    /^[0-9a-f]{16}$/.test(env.contentHash("第一篇测试\n\n正文。")),
+    env.contentHash("第一篇测试\n\n正文。"),
+  );
 }
 
 rmSync(outDir, { recursive: true, force: true });

@@ -784,13 +784,41 @@ def build_wechat(
     theme: str = typer.Option(
         None, "--theme", help="排版主题，见 `inloop themes`；默认取 config/wechat.yaml"
     ),
+    preview_hash: str = typer.Option(
+        None,
+        "--preview-hash",
+        help="上次构建时的正文哈希；内容未变且产物仍在时跳过重建，只回报结果",
+    ),
 ) -> None:
-    """构建微信公众号产物（任务书 §8）。"""
+    """构建微信公众号产物（任务书 §8）。
+
+    ``--preview-hash`` 是给实时预览用的：编辑器每次按键都会触发一次预览，
+    而每次构建都要启动一个 Python 进程（约 300ms）。传入上次的哈希后，
+    内容没变就直接回报现有结果，省掉这次重建——既快，也不会因为高频
+    子进程活动影响面板里的输入体验。
+    """
     config = _config_or_fail()
     content_root = _content_root_or_fail(config)
     location, article = _load_article_or_fail(config, content_root, target)
 
     from inloop.build import BuildError, build_article
+
+    # 内容没变 + 产物齐全 → 直接回报，不重建
+    if preview_hash:
+        cached = _reuse_build_if_unchanged(
+            location, content_root, config, preview_hash, theme=theme
+        )
+        if cached is not None:
+            if _json_output():
+                from inloop import jsonapi
+
+                jsonapi.emit(jsonapi.build_payload(cached, content_root=content_root))
+            else:
+                console.print(
+                    f"[dim]内容未变化，复用已有产物："
+                    f"{_relative(cached.output_dir, config.root)}[/dim]"
+                )
+            return
 
     try:
         outcome = build_article(
@@ -1484,6 +1512,80 @@ def status(
     console.print(
         f"[bold green]✓[/bold green] {_relative(location.index, config.root)} "
         f"status → {want.value}"
+    )
+
+
+def _reuse_build_if_unchanged(
+    location: ArticleLocation,
+    content_root: Path,
+    config: Config,
+    preview_hash: str,
+    *,
+    theme: str | None,
+) -> object | None:
+    """内容未变且产物齐全时，直接复用已有产物而不重建。
+
+    为什么需要：实时预览在编辑器每次按键后都会调用一次构建，而每次构建都要
+    启动一个 Python 进程（约 300ms）。没有这个判断，打字时会持续产生子进程，
+    既浪费又会打扰面板里的输入体验（用户实测"点进输入框后打不了字"）。
+
+    **只在能可靠确认"可以复用"时才复用**，任何一处对不上就返回 None 走正常构建：
+
+    - 正文哈希必须与传入的 ``preview_hash`` 一致
+    - 传了 ``--theme`` 时必须与产物里记录的主题一致（换主题必须重建）
+    - 产物目录、``article.html``、``metadata.json`` 必须都在
+
+    Returns:
+        :class:`inloop.build.BuildOutcome`，或 None 表示需要真正构建。
+    """
+    from inloop.build import BuildOutcome, content_hash
+
+    # 与插件端算法一致：哈希**文件原文**
+    if content_hash(location.index.read_text(encoding="utf-8")) != preview_hash:
+        return None
+
+    output_dir = config.resolve_dist_root() / "wechat" / location.dir_name
+    metadata_path = output_dir / "metadata.json"
+    if not (output_dir / "article.html").is_file() or not metadata_path.is_file():
+        return None
+
+    import json as _json
+
+    try:
+        metadata = _json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, _json.JSONDecodeError):
+        return None
+    if not isinstance(metadata, dict):
+        return None
+
+    # 主题相关：产物里记录了主题，请求的主题与它不一致就必须重建
+    if theme is not None:
+        from inloop.rendering import read_theme_from_html
+
+        recorded = ""
+        try:
+            recorded = read_theme_from_html(
+                (output_dir / "article.html").read_text(encoding="utf-8")
+            )
+        except OSError:
+            return None
+        if recorded and recorded != theme:
+            return None
+
+    # 产物文件清单直接从磁盘取（不写死文件名，图片名是构建时决定的）
+    files = sorted(
+        path.relative_to(output_dir).as_posix()
+        for path in output_dir.rglob("*")
+        if path.is_file()
+    )
+
+    return BuildOutcome(
+        output_dir=output_dir,
+        files=[Path(name) for name in files],
+        images=[],
+        warnings=[],
+        metadata=metadata,
+        content_hash=preview_hash,
     )
 
 

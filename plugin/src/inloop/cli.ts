@@ -126,6 +126,8 @@ export interface ImageEntry {
 export interface BuildResult extends Envelope {
   content_root: string;
   output_dir: string;
+  /** 正文哈希：内容没变时可以跳过重复构建（实时预览靠它省掉大量 Python 启动） */
+  content_hash: string;
   files: string[];
   html_path: string;
   preview_path: string;

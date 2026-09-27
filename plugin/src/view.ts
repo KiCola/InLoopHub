@@ -9,7 +9,7 @@ import { ItemView, Notice, WorkspaceLeaf, setIcon } from "obsidian";
 import type InloopPlugin from "./main";
 import type { ArticleSummary, BuildResult, ImageEntry } from "./inloop/cli";
 import { STATUSES } from "./inloop/cli";
-import { readBinaryFile, readTextFile, toVaultPath } from "./obsidian-env";
+import { contentHash, readBinaryFile, readTextFile, toVaultPath } from "./obsidian-env";
 import {
   FRAME_SANDBOX,
   extractBodyHtml,
@@ -60,6 +60,49 @@ export class InloopPreviewView extends ItemView {
   private rendering = false;
   /** 渲染期间是否又有新请求（结束后补跑一次） */
   private renderQueued = false;
+
+  /** 当前预览的是哪篇文章（与 previewHash 配合做缓存判定） */
+  private previewSlug = "";
+  /** 上次预览用的文件原文哈希；内容没变时连 Python 都不用叫 */
+  private previewHash = "";
+  /** "正在渲染…"提示元素，内容未变时只把它移除、保留画面 */
+  private busyEl: HTMLElement | null = null;
+  /** 文章原文缓存（按 mtime 判失效），避免每次刷新都读盘 */
+  private readonly textCache = new Map<string, { mtime: number; text: string }>();
+
+  /**
+   * 读当前打开文章的**文件原文**。
+   *
+   * 为什么需要它：插件要自己算出"内容变没变"，否则每次按键都要起一个
+   * Python 进程（约 300ms），面板里的输入会被拖垮。
+   *
+   * 走 Obsidian 的 vault API（内容目录通常在 vault 内，例如通过目录联接
+   * 接进来的 `InLoopContent/`）。读不到时返回 null，调用方会退化为
+   * "每次都让 Python 判断"——功能不受影响，只是慢一点。
+   */
+  private readArticleText(): string | null {
+    const file = this.app.workspace.getActiveFile();
+    if (!file) return null;
+    const cached = this.textCache.get(file.path);
+    if (cached && cached.mtime === file.stat.mtime) return cached.text;
+
+    try {
+      // vault 内文件统一走适配器读取（同步版本，避免 await 打断渲染流程）
+      const adapter = this.app.vault.adapter as unknown as {
+        read?: (path: string) => Promise<string>;
+        readSync?: (path: string) => string;
+      };
+      if (typeof adapter.readSync === "function") {
+        const text = adapter.readSync(file.path);
+        this.textCache.set(file.path, { mtime: file.stat.mtime, text });
+        return text;
+      }
+    } catch {
+      // 读不到就让上层退化为"交给 Python 判断"
+    }
+    return null;
+  }
+
 
   constructor(leaf: WorkspaceLeaf, plugin: InloopPlugin) {
     super(leaf);
@@ -344,15 +387,38 @@ export class InloopPreviewView extends ItemView {
   private async renderPreview(): Promise<void> {
     const host = this.previewEl;
     if (!host) return;
-    host.empty();
 
     const slug = this.plugin.activeSlug();
     if (!slug) {
+      host.empty();
       host.createDiv({
         cls: "inloop-hint",
         text: "打开一篇 InLoop 文章（内容目录里的 index.md）后，这里会显示预览。",
       });
       return;
+    }
+
+    // 切换了文章：缓存失效，必须重建
+    if (this.previewSlug !== slug) {
+      this.previewHash = "";
+      this.previewSlug = slug;
+    }
+
+    // **先自己算哈希：内容没变就不叫 Python。**
+    // 一次预览要起一个 Python 进程（约 300ms），而编辑器每次按键都会触发预览。
+    // 不先自己判断，打字期间会持续产生子进程，面板里的输入会被拖垮
+    // （用户实测"点进输入框后打不了字"）。哈希算法两端一致，见 obsidian-env.contentHash。
+    const sourceText = this.readArticleText();
+    if (sourceText !== null) {
+      const local = contentHash(sourceText);
+      if (local && local === this.previewHash) {
+        // 内容没变：**保留上次的画面**，只把"正在渲染"提示去掉。
+        // 清空重画会让预览闪烁，而它其实一个字都没变。
+        this.busyEl?.remove();
+        this.busyEl = null;
+        this.setStatus("内容未变化", "ok");
+        return;
+      }
     }
 
     // 预览方式：用 Python 构建一次，然后加载产物 HTML。
@@ -362,13 +428,22 @@ export class InloopPreviewView extends ItemView {
     // 耗时实测：Python 启动约 300ms，构建本身 250–350ms。叠加 400ms 防抖后，
     // 停止输入到看到预览约 0.9–1.0 秒。长文章不是瓶颈（成本被进程启动主导），
     // 因此给出明确的进行中提示，而不是让界面静默停住。
-    const busy = host.createDiv({ cls: "inloop-hint inloop-busy", text: "正在渲染…" });
+    //
+    // 注意：**只有内容真的变了才走到这里**——上一段已用本地哈希挡掉了
+    // 无变化的刷新，因此不会为了"看一眼"而起子进程。
+    host.empty();
+    this.busyEl = host.createDiv({ cls: "inloop-hint inloop-busy", text: "正在渲染…" });
+    const busy = this.busyEl;
     try {
       const build = await this.plugin.runRaw(["build-wechat", slug]);
       const result = build as unknown as BuildResult;
+      if (result.content_hash) {
+        this.previewHash = result.content_hash;
+      }
       // 读一次产物，确认它真的存在且可读；失败时异常会带**真实原因**
       const html = readTextFile(result.html_path);
       busy.remove();
+      this.busyEl = null;
       const body = extractBodyHtml(html);
 
       // 把图片内联成 data URI 再放进 iframe。

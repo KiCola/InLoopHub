@@ -71,6 +71,30 @@ export function readBinaryFile(path: string): Uint8Array | null {
 }
 
 /**
+ * 文本的短哈希，算法与 Python 侧 `inloop.build.content_hash` **必须一致**：
+ * SHA-256 的前 16 位十六进制。
+ *
+ * 为什么要有两份实现：插件要在**不启动 Python** 的前提下判断"内容变没变"。
+ * 实时预览每次按键都要问一次，而起一个 Python 进程约 300ms——
+ * 插件的输入体验会被这种高频子进程活动拖垮（用户实测"点进输入框打不了字"）。
+ *
+ * 两端算法一旦漂移，缓存就永远命中不了（表现为预览不再跟着更新），
+ * 因此 `plugin/scripts/unit.mjs` 里用同一段文字在两边各算一次做校验。
+ */
+export function contentHash(text: string): string {
+  const crypto = require("node:crypto") as {
+    createHash?: (algorithm: string) => {
+      update: (data: string, encoding: string) => { digest: (encoding: string) => string };
+    };
+  };
+  if (typeof crypto.createHash !== "function") {
+    // 拿不到 Node 加密能力时返回空串：调用方退化为"每次都让 Python 判断"
+    return "";
+  }
+  return crypto.createHash("sha256").update(text, "utf8").digest("hex").slice(0, 16);
+}
+
+/**
  * 读一个文本文件；失败时**抛出带原因的异常**。
  *
  * 为什么不返回 `null` 表示失败：那样调用方只能说"读不到产物"，

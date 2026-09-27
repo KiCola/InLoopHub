@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass, field
@@ -72,6 +73,10 @@ class BuildOutcome:
             ``output_relative`` 是产物内路径，供将来上传平台后回填正文。
         warnings: 非致命问题，必须展示给使用者。
         metadata: 写入 metadata.json 的内容。
+        content_hash: 正文（渲染输入）的 SHA-256 前 16 位十六进制。
+            调用方据此判断"内容有没有变"，从而跳过无意义的重复构建——
+            实时预览每次按键都会触发一次构建，不做这个判断等于每 400ms
+            启动一个 Python 进程（实测过，既浪费又影响输入焦点）。
     """
 
     output_dir: Path
@@ -79,6 +84,7 @@ class BuildOutcome:
     images: list[ImageAsset] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     metadata: dict[str, object] = field(default_factory=dict)
+    content_hash: str = ""
 
 
 def build_article(
@@ -226,7 +232,43 @@ def build_article(
         images=list(assets.assets),
         warnings=warnings,
         metadata=metadata,
+        content_hash=_hash_of_source(article),
     )
+
+
+def _hash_of_source(article: Article) -> str:
+    """文章**文件原文**的哈希。
+
+    优先读文件（与插件端算法一致，插件据此自行判断是否需要调用本程序）；
+    文件读不到时退回哈希解析后的正文，保证任何情况下都有值可用。
+    """
+    source = article.source
+    if source is not None:
+        try:
+            return content_hash(source.read_text(encoding="utf-8"))
+        except OSError:
+            pass
+    return content_hash(article.body)
+
+
+def content_hash(text: str) -> str:
+    """文本的短哈希（SHA-256 前 16 位十六进制）。
+
+    **哈希的是文章文件的原文（含 front matter），不是解析后的正文。**
+    这个选择是有意的：调用方（编辑器插件）需要在**不启动 Python** 的前提下
+    自行判断"内容变没变"——每次按键都起一个进程约 300ms，实时预览受不了。
+    而插件手里只有文件原文，因此哈希必须以文件原文为准，
+    两端才能算出同一个值。
+
+    算正文或算原文对"内容变了吗"这个判断等价（front matter 变了也该重算），
+    但只有原文是两端都能拿到的。
+    """
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _content_hash(body: str) -> str:
+    """兼容旧名：哈希一段文本。"""
+    return content_hash(body)
 
 
 # --- 元数据 ---------------------------------------------------------------
