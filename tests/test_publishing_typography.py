@@ -14,6 +14,39 @@ from inloop.models.article import Article
 from inloop.typography import TypographyError, read_typography, save_typography
 
 
+def test_中英文字体独立选择并进入产物(mini_repo: Path, mini_article) -> None:
+    index, text = mini_article
+    save_typography(mini_repo, mini_repo, 7, {"font_en": "Times New Roman"}, global_scope=True)
+    save_typography(mini_repo, mini_repo, 7, {"font_zh": "楷体"})
+    result = read_typography(mini_repo, mini_repo, 7)
+    assert result["effective"] == {"font_en": "Times New Roman", "font_zh": "楷体"}
+    outcome = build_article(
+        Article.from_text(text, source=index),
+        config=load_config(mini_repo), content_root=mini_repo,
+    )
+    soup = BeautifulSoup(
+        (outcome.output_dir / "article.html").read_text(encoding="utf-8"), "html.parser",
+    )
+    for tag in (soup.body.div, soup.h1, soup.strong):
+        family = tag["style"].split("font-family:")[1].split(";")[0]
+        assert family.index("Times New Roman") < family.index("KaiTi")
+        assert "STKaiti" in family
+    assert "Times New Roman" not in soup.pre["style"]
+    assert index.read_text(encoding="utf-8") == text
+
+
+@pytest.mark.parametrize("font", ['x";color:red', "x,url(test)", "<script>", " ", "x" * 81])
+def test_自定义字体只接受字体名称(mini_repo: Path, font: str) -> None:
+    with pytest.raises(TypographyError):
+        save_typography(mini_repo, mini_repo, 7, {"font_zh": font})
+
+
+def test_自定义字体可保存且兼容原设置(mini_repo: Path) -> None:
+    values = {"font_family": "serif", "font_zh": "华文行楷", "font_en": "Georgia"}
+    save_typography(mini_repo, mini_repo, 7, values)
+    assert read_typography(mini_repo, mini_repo, 7)["effective"] == values
+
+
 def test_覆盖继承与恢复(mini_repo: Path) -> None:
     save_typography(mini_repo, mini_repo, 7, {"font_size": 18}, global_scope=True)
     save_typography(mini_repo, mini_repo, 7, {"line_height": 2, "font_size": 17})

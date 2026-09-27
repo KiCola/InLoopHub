@@ -494,6 +494,7 @@ console.log("发布排版表单");
   let rejectSave = false;
   const settings = { global: { font_size: 16 }, article: {}, effective: { font_size: 16 },
     fonts: { system: "系统默认", serif: "衬线" },
+    font_choices: { font_zh: ["楷体", "宋体"], font_en: ["Times New Roman", "Arial"] },
     fields: { font_size: { min: 12, max: 24, step: 1, label: "正文字号（px）" } } };
   const panel = new module.TypographyPanel(host, {
     load: async () => settings,
@@ -507,9 +508,13 @@ console.log("发布排版表单");
   panel.details.open = true;
   await panel.load();
   const input = panel.inputs.get("font_size");
+  check("表单提供中英文字体而非风格", host.allText().includes("中文字体") && host.allText().includes("英文字体"));
+  panel.inputs.get("font_zh").value = "楷体";
+  panel.inputs.get("font_en").value = "Times New Roman";
   check("默认当前文章且空值继承", input.value === "" && panel.scope === "article");
   input.value = "19";
   await panel.apply(false);
+  check("中英文字体作为名称分别保存", writes[0].values.font_zh === "楷体" && writes[0].values.font_en === "Times New Roman");
   check("文章覆盖保存到所选文章", writes[0].target === "a" && writes[0].values.font_size === 19 && !writes[0].globalScope);
   selected = "b";
   await panel.update(selected);

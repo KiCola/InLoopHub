@@ -8,6 +8,7 @@ export interface TypographyResult {
   article: TypographySettings;
   effective: TypographySettings;
   fonts: Record<string, string>;
+  font_choices: Record<string, string[]>;
   fields: Record<string, { min: number; max: number; step: number; label: string }>;
 }
 
@@ -15,6 +16,8 @@ interface TypographyActions {
   load(target: string): Promise<TypographyResult>;
   save(target: string, values: TypographySettings, globalScope: boolean): Promise<TypographyResult>;
 }
+
+let nextFontListId = 0;
 
 export class TypographyPanel {
   private readonly details: HTMLDetailsElement;
@@ -90,15 +93,21 @@ export class TypographyPanel {
       ? "留空沿用全局或主题。切换文章会丢弃未应用输入。"
       : "影响未单独覆盖的文章；当前文章的单独设置仍优先。" });
     const values = data[this.scope];
-    const fontLabel = fieldset.createEl("label", { cls: "inloop-type-row" });
-    fontLabel.createSpan({ text: "字体风格" });
-    const font = fontLabel.createEl("select");
-    const inheritedFont = this.scope === "article" ? data.global.font_family : undefined;
-    font.createEl("option", { value: "", text: inheritedFont
-      ? `继承全局：${data.fonts[String(inheritedFont)]}` : "继承主题" });
-    for (const [value, text] of Object.entries(data.fonts)) font.createEl("option", { value, text });
-    font.value = String(values.font_family ?? "");
-    this.inputs.set("font_family", font);
+    for (const [key, labelText] of [["font_zh", "中文字体"], ["font_en", "英文字体"]] as const) {
+      const label = fieldset.createEl("label", { cls: "inloop-type-row" });
+      label.createSpan({ text: labelText });
+      const font = label.createEl("input", { type: "text" });
+      const listId = `inloop-font-list-${++nextFontListId}`;
+      font.setAttribute("list", listId);
+      font.maxLength = 80;
+      const inherited = this.scope === "article" ? data.global[key] : undefined;
+      font.placeholder = inherited ? `继承：${inherited}` : "继承原设置；可输入字体名";
+      font.value = String(values[key] ?? "");
+      const choices = label.createEl("datalist", { attr: { id: listId } });
+      for (const value of data.font_choices[key] ?? []) choices.createEl("option", { value });
+      this.inputs.set(key, font);
+    }
+    fieldset.createDiv({ cls: "inloop-hint", text: "例如中文填“楷体”，英文填“Times New Roman”。可选候选或输入其他字体名；设备未安装时会回退。" });
     for (const [key, definition] of Object.entries(data.fields)) {
       const label = fieldset.createEl("label", { cls: "inloop-type-row" });
       label.createSpan({ text: definition.label });
@@ -124,13 +133,17 @@ export class TypographyPanel {
     if (!this.target || !this.fieldset || this.fieldset.disabled) return;
     const values: TypographySettings = {};
     if (!reset) {
+      // 旧版风格保留为回退，避免仅改字号时丢失已有字体选择。
+      const legacy = this.data?.[this.scope].font_family;
+      if (legacy) values.font_family = legacy;
       for (const [key, input] of this.inputs) {
         if (!input.value.trim()) continue;
-        if (key !== "font_family" && !input.checkValidity()) {
+        const isFont = key === "font_zh" || key === "font_en";
+        if (!isFont && !input.checkValidity()) {
           this.message?.setText(`请检查${this.data?.fields[key]?.label}的范围与步长。`);
           return;
         }
-        values[key] = key === "font_family" ? input.value : Number(input.value);
+        values[key] = isFont ? input.value.trim() : Number(input.value);
       }
     }
     const version = this.version;

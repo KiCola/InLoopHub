@@ -702,11 +702,12 @@ def render_wechat_html(
 
 
 def _publishing_body_style(values: dict[str, object]) -> dict[str, str]:
-    from inloop.typography import FONT_FAMILIES
+    from inloop.typography import publishing_font_family
 
     style: dict[str, str] = {}
-    if "font_family" in values:
-        style["font-family"] = FONT_FAMILIES[str(values["font_family"])]
+    family = publishing_font_family(values)
+    if family:
+        style["font-family"] = family
     if "font_size" in values:
         style["font-size"] = f"{values['font_size']:g}px"
     if "line_height" in values:

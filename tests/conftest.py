@@ -95,7 +95,11 @@ def mini_repo(tmp_path: Path) -> Iterator[Path]:
     但当配置或参数指向别处时，文章就长在别处）。
     """
     for name in ("styles", "config", "templates"):
-        shutil.copytree(REPO_ROOT / name, tmp_path / name)
+        ignore = shutil.ignore_patterns("publishing-typography.json") if name == "config" else None
+        shutil.copytree(
+            REPO_ROOT / name, tmp_path / name,
+            ignore=ignore,
+        )
     shutil.copy2(REPO_ROOT / "pyproject.toml", tmp_path / "pyproject.toml")
     yield tmp_path
 

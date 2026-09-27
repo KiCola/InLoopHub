@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,20 @@ FONT_FAMILIES = {
     "serif": '"Songti SC", SimSun, "Noto Serif CJK SC", serif',
 }
 FONT_LABELS = {"system": "系统默认", "sans": "无衬线", "serif": "衬线"}
+FONT_CHOICES = {
+    "font_zh": ["楷体", "宋体", "黑体", "微软雅黑", "仿宋", "华文行楷", "苹方"],
+    "font_en": ["Times New Roman", "Arial", "Georgia", "Cambria", "Calibri", "Helvetica"],
+}
+CHINESE_FONT_STACKS = {
+    "楷体": '"KaiTi", "STKaiti", "Kaiti SC", "楷体"',
+    "宋体": '"SimSun", "Songti SC", "宋体"',
+    "黑体": '"SimHei", "Heiti SC", "黑体"',
+    "微软雅黑": '"Microsoft YaHei", "微软雅黑"',
+    "仿宋": '"FangSong", "STFangsong", "仿宋"',
+    "华文行楷": '"STXingkai", "华文行楷"',
+    "苹方": '"PingFang SC", "苹方"',
+}
+FONT_NAME = re.compile(r"[\w .-]{1,80}")
 LIMITS = {
     "font_size": (12, 24, 1, "正文字号（px）"),
     "heading_size": (16, 36, 1, "主标题字号（px）"),
@@ -37,6 +52,12 @@ def validate_settings(values: object) -> dict[str, Any]:
         if key == "font_family":
             if not isinstance(value, str) or value not in FONT_FAMILIES:
                 raise TypographyError("font_family 无效；请选择 system、sans 或 serif。")
+        elif key in FONT_CHOICES:
+            if (not isinstance(value, str) or not value.strip()
+                    or value != value.strip() or not FONT_NAME.fullmatch(value)):
+                raise TypographyError(
+                    f"{key} 无效；请输入 1–80 字的字体名称，不含引号或 CSS 语法。"
+                )
         elif key in LIMITS:
             low, high, step, label = LIMITS[key]
             if (type(value) not in (int, float) or not math.isfinite(value)
@@ -46,6 +67,22 @@ def validate_settings(values: object) -> dict[str, Any]:
         else:
             raise TypographyError(f"未知发布排版字段 {key}；请移除此字段后重试。")
     return dict(values)
+
+
+def publishing_font_family(values: dict[str, Any]) -> str | None:
+    """西文字体优先，缺少的中文字形再由中文字体提供；保留旧版风格作兜底。"""
+    parts: list[str] = []
+    if "font_en" in values:
+        parts.append(f'"{values["font_en"]}"')
+    if "font_zh" in values:
+        name = values["font_zh"]
+        parts.append(CHINESE_FONT_STACKS.get(name, f'"{name}"'))
+    legacy = FONT_FAMILIES.get(str(values.get("font_family", "")))
+    if legacy:
+        parts.append(legacy)
+    elif parts:
+        parts.append("sans-serif")
+    return ", ".join(parts) if parts else None
 
 
 def _key(content_root: Path, article_id: int) -> str:
@@ -79,6 +116,7 @@ def read_typography(root: Path, content_root: Path, article_id: int) -> dict[str
         "global": data["global"], "article": article,
         "effective": {**data["global"], **article},
         "fonts": FONT_LABELS,
+        "font_choices": FONT_CHOICES,
         "fields": {key: {"min": v[0], "max": v[1], "step": v[2], "label": v[3]}
                    for key, v in LIMITS.items()},
     }
