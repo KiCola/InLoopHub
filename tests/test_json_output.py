@@ -138,6 +138,34 @@ def test_list_输出合法_JSON_且无_ANSI(content_dir: Path) -> None:
     assert data["ok"] is True
 
 
+def test_发布前检查汇总并定位且不落盘(content_dir: Path, tmp_path: Path, monkeypatch) -> None:
+    index = next(content_dir.rglob("index.md"))
+    text = index.read_text(encoding="utf-8").replace('status: "draft"', 'status: "wrong"')
+    text += '\n![[不存在.png]]\n\n![缺图](assets/missing.png)\n\n$x+y$\n'
+    index.write_text(text, encoding="utf-8")
+    output = tmp_path / "preflight-output"
+    monkeypatch.setenv("INLOOP_DIST", str(output))
+    result, payload = invoke_json(content_dir, "check", index.parent.name, "--publish")
+    assert result.exit_code == 1, result.output
+    assert payload is not None, result.output
+    errors = payload["article"]["errors"]
+    assert {"FM013", "IMG105", "IMG001"} <= {issue["code"] for issue in errors}
+    missing = next(issue for issue in errors if issue["code"] == "IMG001")
+    assert missing["line"] == text.splitlines().index("![缺图](assets/missing.png)") + 1
+    assert any(issue["code"] == "MD103" for issue in payload["article"]["warnings"])
+    assert payload["manual_checks"]
+    assert index.read_text(encoding="utf-8") == text
+    assert not output.exists()
+
+
+def test_发布前检查成功仍提示人工复核(content_dir: Path) -> None:
+    index = next(content_dir.rglob("index.md"))
+    result, payload = invoke_json(content_dir, "check", index.parent.name, "--publish")
+    assert result.exit_code == 0, result.output
+    assert payload["error_count"] == 0
+    assert payload["manual_checks"]
+
+
 def test_check_输出合法_JSON(content_dir: Path) -> None:
     result, data = invoke_json(content_dir, "check", "001-json-test")
     assert data is not None, result.stdout[:300]

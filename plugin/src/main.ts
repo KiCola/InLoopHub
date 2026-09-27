@@ -20,6 +20,7 @@ import {
   setStatus,
   type BuildResult,
   type CliOptions,
+  type CheckResult,
 } from "./inloop/cli";
 import {
   DEFAULT_SETTINGS,
@@ -545,20 +546,17 @@ export default class InloopPlugin extends Plugin {
 
   // --- 供视图使用的小工具 -------------------------------------------------
 
-  /** 校验当前文章，返回可读的问题描述（面板显示用） */
-  async checkCurrent(): Promise<string[]> {
+  /** 发布前检查当前文章，保留规则码、行号与人工确认项供面板使用。 */
+  async checkCurrent(): Promise<CheckResult> {
     const file = this.currentArticle();
     if (!file) throw new Error(this.articleHint());
     await this.saveArticle(file);
     const revision = this.articleRevision;
-    const result = await checkArticle(this.cliOptions(), file.parent!.name);
+    const result = await checkArticle(this.cliOptions(), file.parent!.name, true);
     if (this.currentArticle() !== file || revision !== this.articleRevision) {
       throw new Error("文章已切换或修改，请重新校验当前文章。");
     }
-    const article = result.article;
-    return [...article.errors, ...article.warnings].map(
-      (issue) => `${issue.code} [${issue.level}] ${issue.message}`,
-    );
+    return result;
   }
 
   /** 列出文章；失败时把可读错误抛给界面 */

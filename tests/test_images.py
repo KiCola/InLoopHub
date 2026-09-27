@@ -61,6 +61,21 @@ def test_图片不存在报_ERROR(tmp_path: Path) -> None:
     assert any("IMG001" in e for e in result.errors)
 
 
+def test_图片校验失败时不复制封面或部分图片(tmp_path: Path) -> None:
+    result = _prepare(tmp_path, (ExtractedImage("assets/none.png", "图", "", True),))
+    assert not result.ok
+    assert not (tmp_path / "out").exists()
+
+
+def test_封面也检查绝对路径与体积(tmp_path: Path) -> None:
+    cover = tmp_path / "article" / "cover.png"
+    absolute = _prepare(tmp_path, (), cover=str(cover))
+    assert any("IMG002" in issue for issue in absolute.errors)
+    oversized = _prepare(tmp_path, (), error_bytes=1, warning_bytes=1)
+    assert any("IMG005" in issue for issue in oversized.errors)
+    assert not (tmp_path / "out").exists()
+
+
 def test_格式不受支持报_ERROR(tmp_path: Path) -> None:
     (tmp_path / "article" / "assets").mkdir(parents=True, exist_ok=True)
     (tmp_path / "article" / "assets" / "a.bmp").write_bytes(b"BM")

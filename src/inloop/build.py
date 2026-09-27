@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from inloop.assets.pipeline import AssetError, AssetResult, ImageAsset, prepare_images
+from inloop.assets.pipeline import AssetError, AssetResult, ImageAsset, copy_assets, prepare_images
 from inloop.config import Config, load_config
 from inloop.fsutil import write_text
 from inloop.models.article import Article
@@ -60,6 +60,38 @@ PREVIEW_WIDTH_PX = 430
 
 class BuildError(RuntimeError):
     """构建失败。消息中必须包含修正建议。"""
+
+
+@dataclass(slots=True)
+class ContentInspection:
+    """检查与构建共用的内容解析结果；检查阶段不写入任何文件。"""
+
+    html: str
+    assets: AssetResult
+    errors: list[str]
+    warnings: list[str]
+
+
+def inspect_content(article: Article, config: Config, article_dir: Path) -> ContentInspection:
+    """检查图片与微信内容转换，保留规范化结果供构建直接复用。"""
+    rendered = render_markdown(
+        article.body, resolve_embed=lambda name: _resolve_embed(article_dir, name)
+    )
+    normalized = normalize_html(rendered.html)
+    assets = prepare_images(
+        article_dir=article_dir,
+        output_dir=config.resolve_dist_root() / WECHAT_DIR / article.directory_name,
+        images=normalized.images,
+        cover=article.cover,
+        warning_bytes=int(config.wechat_value("image_warning_bytes")),
+        error_bytes=int(config.wechat_value("image_error_bytes")),
+        copy_files=False,
+    )
+    errors = [message for message in rendered.warnings if "[ERROR]" in message]
+    errors.extend(assets.errors)
+    # 公式/脚注的具体降级提示以规范化层为准，避免同一件事重复提醒。
+    warnings = list(normalized.warnings) + assets.warnings
+    return ContentInspection(normalized.html, assets, errors, warnings)
 
 
 @dataclass(slots=True)
@@ -130,46 +162,21 @@ def build_article(
 
     output_dir = resolved_config.resolve_dist_root() / WECHAT_DIR / article.directory_name
 
-    # 1) 正文 Markdown → HTML 片段
-    # 传一个真正的文件解析器进去：Obsidian 的 `![[图.png]]` 只给了文件名，
-    # 而图片可能位于 assets/ 的任意子目录（Obsidian 的附件目录设置会造成
-    # assets/index/ 这类嵌套）。这里按几种常见位置去找，找不到就让 markdown
-    # 层产出 IMG105 ERROR——而不是留一行看不懂的文字在成品里。
-    rendered = render_markdown(
-        article.body,
-        resolve_embed=lambda name: _resolve_embed(resolved_article_dir, name),
-    )
-    warnings: list[str] = list(rendered.warnings)
-
-    # 2) 结构规范化：脚注与公式降级、抽图片清单、剥离 id/class
-    normalized = normalize_html(rendered.html)
-    warnings.extend(normalized.warnings)
-
-    # 3) 素材：校验并复制图片，得到「源路径 → 产物路径」映射
-    warning_bytes = int(resolved_config.wechat_value("image_warning_bytes"))
-    error_bytes = int(resolved_config.wechat_value("image_error_bytes"))
     try:
-        assets = prepare_images(
-            article_dir=resolved_article_dir,
-            output_dir=output_dir,
-            images=normalized.images,
-            cover=article.cover,
-            warning_bytes=warning_bytes,
-            error_bytes=error_bytes,
-        )
+        inspected = inspect_content(article, resolved_config, resolved_article_dir)
     except AssetError as exc:
         raise BuildError(str(exc)) from exc
-
-    warnings.extend(assets.warnings)
-    if assets.errors:
-        detail = "\n".join(f"  {item}" for item in assets.errors)
+    assets = inspected.assets
+    warnings = inspected.warnings
+    if inspected.errors:
+        detail = "\n".join(f"  {item}" for item in inspected.errors)
         raise BuildError(
-            f"素材校验未通过，已中止构建（未产出任何文件）：\n{detail}\n"
+            f"内容或素材校验未通过，已中止构建（未产出任何文件）：\n{detail}\n"
             f"修正方法：按上述提示修复后重新构建。"
         )
 
     # 4) 按素材映射改写正文中的图片路径
-    rewritten_html = _rewrite_image_sources(normalized.html, assets.src_to_output)
+    rewritten_html = _rewrite_image_sources(inspected.html, assets.src_to_output)
 
     # 5) 加样式：CSS 内联 + 白名单清洗（顺带处理标题编号与落款区）
     active_theme = theme or theme_name(resolved_config)
@@ -199,6 +206,7 @@ def build_article(
 
     # 6) 落盘：全部内容准备好后一次性写入，避免中断留下半套产物
     output_dir.mkdir(parents=True, exist_ok=True)
+    copy_assets(assets, output_dir)
     metadata = build_metadata(
         article,
         content_root=resolved_content_root,

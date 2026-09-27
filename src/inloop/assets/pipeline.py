@@ -26,6 +26,7 @@ from inloop.rules import (
     IMG_MISSING,
     IMG_MISSING_ALT,
     IMG_MISSING_CAPTION,
+    IMG_NAME_CONFLICT,
     IMG_TOO_LARGE_ERROR,
     IMG_TOO_LARGE_WARNING,
     IMG_UNSUPPORTED_FORMAT,
@@ -107,6 +108,7 @@ def prepare_images(
     cover: str,
     warning_bytes: int,
     error_bytes: int,
+    copy_files: bool = True,
 ) -> AssetResult:
     """把文章引用的图片复制到产物目录。
 
@@ -117,13 +119,13 @@ def prepare_images(
         cover: 封面文件名，相对文章目录。
         warning_bytes: 体积告警阈值。
         error_bytes: 体积错误阈值。
+        copy_files: False 时只校验并生成清单，不创建或修改产物。
 
     Returns:
         处理结果。**致命问题被收集在 ``errors`` 而不是立刻抛出**，
         这样一次构建能报出全部素材问题，而不是让人改一张跑一次。
     """
     result = AssetResult()
-    images_dir = output_dir / IMAGES_DIR_NAME
     used_names: dict[str, Path] = {}
     # 同一张图可能被引用多次；只复制一次，后续引用直接复用产物路径
     copied: dict[Path, ImageAsset] = {}
@@ -166,10 +168,7 @@ def prepare_images(
             result.errors.append(str(exc))
             continue
 
-        destination = images_dir / output_name
-        _copy(source, destination)
-
-        size = image_size(destination)
+        size = image_size(source)
         asset = ImageAsset(
             source_path=source,
             output_relative=Path(IMAGES_DIR_NAME) / output_name,
@@ -177,7 +176,7 @@ def prepare_images(
             title=image.title,
             from_markdown=True,
             section=image.section,
-            byte_size=destination.stat().st_size,
+            byte_size=source.stat().st_size,
             width=size[0] if size else 0,
             height=size[1] if size else 0,
         )
@@ -185,8 +184,21 @@ def prepare_images(
         result.assets.append(asset)
         result.src_to_output[image.src] = asset.output_relative.as_posix()
 
-    _prepare_cover(article_dir=article_dir, output_dir=output_dir, cover=cover, result=result)
+    _prepare_cover(
+        article_dir=article_dir, cover=cover, result=result,
+        warning_bytes=warning_bytes, error_bytes=error_bytes,
+    )
+    if copy_files and result.ok:
+        copy_assets(result, output_dir)
     return result
+
+
+def copy_assets(result: AssetResult, output_dir: Path) -> None:
+    """全部素材校验通过后复制；不让错误输入留下半套图片。"""
+    if not result.ok:
+        raise AssetError("素材校验未通过，不能复制。修正方法：先修复清单中的错误。")
+    for asset in result.assets:
+        _copy(asset.source_path, output_dir / asset.output_relative)
 
 
 def _check_absolute(src: str, article_dir: Path) -> str | None:
@@ -232,20 +244,7 @@ def _collect_source_issues(
         )
         return False
 
-    size = source.stat().st_size
-    if size > error_bytes:
-        result.errors.append(
-            f"{_rel(source)} {IMG_TOO_LARGE_ERROR.code} "
-            f"[{IMG_TOO_LARGE_ERROR.level.value}] 图片 {_human(size)} 超过上限 "
-            f"{_human(error_bytes)}。"
-            f"修正方法：压缩图片，公众号单图建议控制在 {_human(warning_bytes)} 以内。"
-        )
-    elif size > warning_bytes:
-        result.warnings.append(
-            f"{_rel(source)} {IMG_TOO_LARGE_WARNING.code} "
-            f"[{IMG_TOO_LARGE_WARNING.level.value}] 图片体积偏大：{_human(size)}"
-            f"（建议小于 {_human(warning_bytes)}）。修正方法：压缩后替换。"
-        )
+    _check_size(source, result, warning_bytes, error_bytes, "图片")
 
     _check_caption(image, source, result)
     if not image.title:
@@ -271,10 +270,30 @@ def _check_caption(image: ExtractedImage, source: Path, result: AssetResult) -> 
         )
 
 
-def _prepare_cover(
-    *, article_dir: Path, output_dir: Path, cover: str, result: AssetResult
+def _check_size(
+    source: Path, result: AssetResult, warning_bytes: int, error_bytes: int, label: str
 ) -> None:
-    """把封面复制到产物根目录。"""
+    size = source.stat().st_size
+    if size > error_bytes:
+        result.errors.append(
+            f"{_rel(source)} {IMG_TOO_LARGE_ERROR.code} "
+            f"[{IMG_TOO_LARGE_ERROR.level.value}] {label} `{source.name}` "
+            f"{_human(size)} 超过上限 {_human(error_bytes)}。"
+            f"修正方法：压缩图片，建议控制在 {_human(warning_bytes)} 以内。"
+        )
+    elif size > warning_bytes:
+        result.warnings.append(
+            f"{_rel(source)} {IMG_TOO_LARGE_WARNING.code} "
+            f"[{IMG_TOO_LARGE_WARNING.level.value}] {label} `{source.name}` "
+            f"体积偏大：{_human(size)}（建议小于 {_human(warning_bytes)}）。"
+            "修正方法：压缩后替换。"
+        )
+
+
+def _prepare_cover(
+    *, article_dir: Path, cover: str, result: AssetResult, warning_bytes: int, error_bytes: int
+) -> None:
+    """检查封面并加入待复制清单。"""
     if not cover.strip():
         result.errors.append(
             f"{_rel(article_dir)} {IMG_COVER_MISSING.code} "
@@ -283,6 +302,10 @@ def _prepare_cover(
         )
         return
 
+    absolute_issue = _check_absolute(cover, article_dir)
+    if absolute_issue:
+        result.errors.append(absolute_issue.replace("图片使用了", "封面使用了"))
+        return
     source = _resolve(article_dir, cover)
     if not source.is_file():
         result.errors.append(
@@ -301,9 +324,8 @@ def _prepare_cover(
         )
         return
 
-    destination = output_dir / source.name
-    _copy(source, destination)
-    size = image_size(destination)
+    _check_size(source, result, warning_bytes, error_bytes, "封面")
+    size = image_size(source)
     result.assets.append(
         ImageAsset(
             source_path=source,
@@ -311,7 +333,7 @@ def _prepare_cover(
             alt="封面",
             title="",
             from_markdown=False,
-            byte_size=destination.stat().st_size,
+            byte_size=source.stat().st_size,
             width=size[0] if size else 0,
             height=size[1] if size else 0,
         )
@@ -347,6 +369,7 @@ def _unique_name(name: str, source: Path, used: dict[str, Path]) -> str:
         return name
 
     raise AssetError(
+        f"{IMG_NAME_CONFLICT.code} [{IMG_NAME_CONFLICT.level.value}] "
         f"产物中的图片文件名冲突：`{name}`\n"
         f"  来源一：{existing}\n"
         f"  来源二：{source}\n"

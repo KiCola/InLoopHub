@@ -252,3 +252,38 @@ def test_代码块里的换行不受_breaks_影响() -> None:
     rendered = render_markdown("```\na = 1\nb = 2\n```")
     assert "<br" not in rendered.html, rendered.html
     assert "a = 1" in rendered.html
+
+
+@pytest.mark.parametrize("wrapper", ["", "**", "*", "~~"])
+def test_嵌入图片保留前后文字和强调(wrapper: str) -> None:
+    html = render_markdown(f"{wrapper}Before ![[a.png]] after{wrapper}").html
+    assert html.index("Before ") < html.index("<img") < html.index(" after")
+    assert 'src="assets/a.png"' in html
+    if wrapper == "**":
+        assert "<strong>Before <img" in html
+        assert " after</strong>" in html
+
+
+def test_缺图占位保留文字顺序() -> None:
+    html = render_markdown("Before ![[a.png]] after", resolve_embed=lambda _: None).html
+    assert html.index("Before ") < html.index("<code>") < html.index(" after")
+
+
+def test_嵌入语法在代码示例中保持原文() -> None:
+    source = '```markdown\n![[不存在.png]]\n```\n\n`![[不存在.png]]`\n'
+    rendered = render_markdown(source, resolve_embed=lambda _: None)
+    assert not rendered.warnings
+    assert rendered.html.count("![[不存在.png]]") == 2
+
+
+def test_缺失嵌入图片阻止构建且不写产物(mini_repo: Path, mini_article) -> None:
+    from inloop.build import BuildError, build_article
+    from inloop.config import load_config
+    from inloop.models.article import Article
+
+    index, text = mini_article
+    article = Article.from_text(text + "\n![[不存在.png]]\n", source=index)
+    config = load_config(mini_repo)
+    with pytest.raises(BuildError, match="IMG105"):
+        build_article(article, config=config, content_root=mini_repo)
+    assert not config.resolve_dist_root().exists()

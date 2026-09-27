@@ -400,6 +400,7 @@ inloop check 002-light-o1
 - 图片是否存在
 - cover 是否存在
 - 图片是否有 alt
+- 图片产物文件名是否冲突（IMG006）；Obsidian 图片嵌入是否失效（IMG105）
 - 本地引用是否失效
 - 是否存在绝对路径
 - status 是否合法

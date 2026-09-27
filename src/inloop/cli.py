@@ -596,6 +596,9 @@ def check(
     all_articles: bool = typer.Option(
         False, "--all", help="检查内容目录里的**全部**文章，而不是单篇"
     ),
+    publish: bool = typer.Option(
+        False, "--publish", help="单篇发布前检查：属性、正文转换和图片，不写产物"
+    ),
 ) -> None:
     """检查文章（任务书 §7.2）。
 
@@ -606,6 +609,12 @@ def check(
     content_root = _content_root_or_fail(config)
 
     if all_articles:
+        if publish:
+            _fail(
+                "--publish 需要指定一篇文章，不能与 --all 同用。"
+                "修正方法：运行 `check <文章> --publish`。"
+            )
+            return
         _check_all(config, content_root, quiet=quiet)
         return
 
@@ -624,15 +633,37 @@ def check(
         return
 
     try:
-        article = Article.from_text(
-            location.index.read_text(encoding="utf-8"), source=location.index
-        )
+        source_text = location.index.read_text(encoding="utf-8")
+        article = Article.from_text(source_text, source=location.index)
     except ArticleError as exc:
         _fail(
             f"{_display_path(location.index, config, content_root)} 结构错误：{exc}",
             code="article_unparsable",
             hint="检查该文件的 Front Matter（两行 --- 之间）与正文结构。",
         )
+        return
+
+    if publish:
+        from inloop import jsonapi
+        from inloop.preflight import publication_check
+
+        payload = publication_check(article, location, config, source_text)
+        if _json_output():
+            jsonapi.emit(payload)
+        else:
+            for issue in payload["article"]["errors"] + payload["article"]["warnings"]:
+                console.print(
+                    f"{issue['file']}:{issue['line'] or '-'} {issue['code']} "
+                    f"[{issue['level']}] {issue['message']}", markup=False
+                )
+            console.print(
+                f"发布前检查：{payload['error_count']} 个错误，"
+                f"{payload['warning_count']} 个提醒。"
+            )
+            for item in payload["manual_checks"]:
+                console.print(f"人工确认：{item}")
+        if not payload["ok"]:
+            raise typer.Exit(code=EXIT_VALIDATION_FAILED)
         return
 
     if _json_output():

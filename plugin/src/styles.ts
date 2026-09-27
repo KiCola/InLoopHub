@@ -104,6 +104,7 @@ const CSS = `
 }
 .inloop-current { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 0; }
 .inloop-validation { margin-bottom: 8px; }
+.inloop-check-issue { margin-bottom: 8px; overflow-wrap: anywhere; }
 .inloop-article-meta { font-size: 11px; color: var(--text-muted); }
 .inloop-article-actions { display: flex; gap: 2px; align-items: center; }
 

@@ -7,7 +7,7 @@
 
 import { ItemView, Notice, WorkspaceLeaf, setIcon, type TFile } from "obsidian";
 import type InloopPlugin from "./main";
-import type { ArticleSummary, BuildResult, ImageEntry } from "./inloop/cli";
+import type { ArticleSummary, BuildResult, ImageEntry, IssueInfo } from "./inloop/cli";
 import { STATUSES } from "./inloop/cli";
 import { contentHash, contentPathToVault, readBinaryFile, readTextFile } from "./obsidian-env";
 import {
@@ -161,7 +161,7 @@ export class InloopPreviewView extends ItemView {
       void this.render();
     };
 
-    const checkBtn = toolbar.createEl("button", { cls: "inloop-btn", text: "校验文章属性" });
+    const checkBtn = toolbar.createEl("button", { cls: "inloop-btn", text: "发布前检查" });
     checkBtn.onclick = () => void this.checkArticle();
     this.articleButtons.push(checkBtn);
 
@@ -296,16 +296,39 @@ export class InloopPreviewView extends ItemView {
     const file = this.plugin.currentArticle();
     if (!file || !this.validationEl) return;
     const host = this.validationEl;
-    host.setText("正在校验文章属性…");
+    host.setText("正在检查文章属性、正文转换与图片…");
     try {
-      const issues = await this.plugin.checkCurrent();
+      const result = await this.plugin.checkCurrent();
       if (this.plugin.currentArticle() !== file) return;
       host.empty();
-      if (issues.length === 0) host.createDiv({ text: "文章属性校验通过。" });
-      for (const issue of issues) host.createDiv({ cls: "inloop-hint", text: issue });
+      host.createDiv({
+        text: result.error_count > 0
+          ? `检查未通过：${result.error_count} 个错误，${result.warning_count} 个提醒。`
+          : `自动检查通过，${result.warning_count} 个提醒；仍需人工复核。`,
+      });
+      this.renderIssues(host, "必须修复", result.article.errors, file);
+      this.renderIssues(host, "建议处理", result.article.warnings, file);
+      if (result.manual_checks?.length) {
+        host.createEl("h5", { text: "人工确认" });
+        for (const item of result.manual_checks) host.createDiv({ cls: "inloop-hint", text: item });
+      }
     } catch (error) {
       if (this.plugin.currentArticle() !== file) return;
       host.setText(`校验未完成：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private renderIssues(host: HTMLElement, title: string, issues: IssueInfo[], file: TFile): void {
+    if (issues.length === 0) return;
+    host.createEl("h5", { text: title });
+    for (const issue of issues) {
+      const row = host.createDiv({ cls: "inloop-check-issue" });
+      row.createDiv({ cls: "inloop-hint", text: `${issue.code}：${issue.message}` });
+      const locate = row.createEl("button", {
+        cls: "inloop-link-btn",
+        text: issue.line ? `定位第 ${issue.line} 行` : "打开文章检查",
+      });
+      locate.onclick = () => this.openInEditor(file, issue.line ?? 1);
     }
   }
 
@@ -453,7 +476,7 @@ export class InloopPreviewView extends ItemView {
     new Notice(`在 vault 里没找到这篇文章：${vaultPath}`, 10000);
   }
 
-  private async openInEditor(file: TFile): Promise<void> {
+  private async openInEditor(file: TFile, line?: number): Promise<void> {
     try {
       const workspace = this.app.workspace;
       const leaves = workspace.getLeavesOfType("markdown")
@@ -461,7 +484,10 @@ export class InloopPreviewView extends ItemView {
       const recent = workspace.getMostRecentLeaf(workspace.rootSplit);
       const leaf = leaves.find(item => (item.view as { file?: TFile })?.file === file)
         ?? leaves.find(item => item === recent) ?? leaves[0] ?? workspace.getLeaf("tab");
-      await leaf.openFile(file);
+      await leaf.openFile(file, line === undefined ? undefined : {
+        state: { mode: "source", source: true },
+        eState: { line: Math.max(0, line - 1) },
+      });
       this.plugin.selectArticle(file);
       this.plugin.refreshPreview();
     } catch (error) {

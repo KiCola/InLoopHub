@@ -21,7 +21,7 @@ Asset Pipeline、Future Publisher Interface。
         ▼                                   ▼
    ImageRef 清单 ─────────────────▶  dist/wechat/<slug>/
                                             │
-                                            │  publish（第一阶段未实现）
+                                            │  上传素材、创建草稿（真实账号未验证）
                                             ▼
                                       微信公众号
 ```
@@ -72,7 +72,8 @@ Asset Pipeline、Future Publisher Interface。
 **已实现**：`parse_front_matter()`，处理 BOM、CRLF、空块、未闭合定界符、
 YAML 语法错误、顶层非映射，并返回正文起始行号以便把校验结果定位回源文件。
 
-**未实现**：`markdown.py`（Markdown → HTML）。
+**已实现**：`markdown.py` 使用 markdown-it 渲染正文；Obsidian 图片嵌入在行内语法层
+转换，代码块与行内代码中的示例保持原文。
 
 **为什么渲染不碰图片路径**：图片的实际落盘位置由 Asset Pipeline 决定，
 正文该怎么写由渲染层与发布层约定。让解析阶段去猜路径，是耦合的开始。
@@ -83,7 +84,7 @@ YAML 语法错误、顶层非映射，并返回正文起始行号以便把校验
 
 **职责**：把 HTML 片段变成目标平台可消费的形态。
 
-1. 按 `styles/wechat.css` 的**元素选择器**逐元素写入 inline style。
+1. 按 `styles/base.css`、`styles/code.css` 和所选主题的**元素选择器**逐元素写入 inline style。
 2. 按白名单清洗：只保留允许的标签与属性，剔除 `<script>`、事件属性、外链 CSS、`iframe`。
 3. 处理标题编号（`01 · Problem` 形式）、引用块、表格、代码块、图片与 caption。
 
@@ -126,7 +127,12 @@ dist/wechat/<slug>/
 2. 校验：文件是否存在、扩展名是否受支持、是否用了绝对路径。
 3. 检查体积：超过 `image_warning_bytes` 给 WARNING，超过 `image_error_bytes` 给 ERROR
    （阈值来自 `config/wechat.yaml`，不在代码里硬编码）。
-4. 复制到产物目录，产出 `ImageRef` 清单供发布阶段回填。
+4. 先完成检查与清单，再复制到产物目录；构建时内容、素材和样式检查通过后才开始写入。
+
+`build.inspect_content()` 是发布前检查与构建共用的内容检查入口。
+`preflight.publication_check()` 汇总属性、图片和转换诊断，给出可定位行号及人工确认清单，
+不创建产物。复制与检查通过 `prepare_images(copy_files=False)`、`copy_assets()` 分离。
+文件写入逐个完成，不是整个目录的事务；磁盘写入阶段的异常仍可能留下不完整产物。
 
 **明确不负责**：决定正文 HTML 里的 `src` 写法。路径改写由渲染层依据清单统一完成，
 避免"复制图片"和"改写 HTML"两处各改一半。

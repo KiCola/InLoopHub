@@ -80,6 +80,7 @@ IMG_ABSOLUTE_PATH = Rule("IMG002", IssueLevel.ERROR, "图片使用了绝对路�
 IMG_COVER_MISSING = Rule("IMG003", IssueLevel.ERROR, "cover 指向的文件不存在")
 IMG_UNSUPPORTED_FORMAT = Rule("IMG004", IssueLevel.ERROR, "图片格式不受支持")
 IMG_TOO_LARGE_ERROR = Rule("IMG005", IssueLevel.ERROR, "图片超过体积上限")
+IMG_NAME_CONFLICT = Rule("IMG006", IssueLevel.ERROR, "不同图片使用了相同的产物文件名")
 IMG_MISSING_ALT = Rule("IMG101", IssueLevel.WARNING, "正文图片缺少有意义的 alt")
 IMG_TOO_LARGE_WARNING = Rule("IMG102", IssueLevel.WARNING, "图片体积偏大")
 IMG_MISSING_CAPTION = Rule("IMG103", IssueLevel.WARNING, "图片缺少 title（caption）")
@@ -133,6 +134,8 @@ ALL_RULES: tuple[Rule, ...] = tuple(
             IMG_COVER_MISSING,
             IMG_UNSUPPORTED_FORMAT,
             IMG_TOO_LARGE_ERROR,
+            IMG_NAME_CONFLICT,
+            EMBED_NOT_FOUND,
             IMG_MISSING_ALT,
             IMG_TOO_LARGE_WARNING,
             IMG_MISSING_CAPTION,

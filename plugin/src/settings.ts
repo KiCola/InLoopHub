@@ -83,8 +83,6 @@ export interface InloopSettings {
   repoRoot: string;
   /** 内容目录（放文章的地方）；留空则默认 <vault>/InLoopPub */
   contentRoot: string;
-  /** 兼容旧设置文件保留；预览现已自动适应侧栏宽度，不再读取此值 */
-  previewWidth: number;
   /** 编辑停止多久后重新渲染（毫秒）。太小会卡，太大会觉得迟钝 */
   previewDebounceMs: number;
 }
@@ -93,7 +91,6 @@ export const DEFAULT_SETTINGS: InloopSettings = {
   executable: "",
   repoRoot: "",
   contentRoot: "",
-  previewWidth: 430,
   previewDebounceMs: 400,
 };
 

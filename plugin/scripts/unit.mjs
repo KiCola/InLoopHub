@@ -499,7 +499,8 @@ console.log("文章列表操作与异步预览");
   let opened = null;
   let selected = null;
   const centerRoot = {};
-  const editorLeaf = { getRoot: () => centerRoot, openFile: async (target) => { opened = target; } };
+  let openState;
+  const editorLeaf = { getRoot: () => centerRoot, openFile: async (target, state) => { opened = target; openState = state; } };
   const sidebarEditor = { getRoot: () => ({}), openFile: async () => { throw new Error("不能在侧栏编辑文章"); } };
   const app = {
     vault: {
@@ -532,6 +533,28 @@ console.log("文章列表操作与异步预览");
   sizing.previewEl = new TestElement();
   sizing.applyPreviewWidth();
   check("旧的 430px 设置不再限制侧栏预览宽度", sizing.previewEl.style.width === "100%");
+  plugin.currentArticle = () => file;
+  plugin.checkCurrent = async () => ({
+    error_count: 1, warning_count: 1,
+    article: {
+      errors: [{ code: "IMG001", message: "正文图片不存在，请修正路径", line: 23 }],
+      warnings: [{ code: "MD103", message: "公式降级为文本", line: null }],
+    },
+    manual_checks: ["请在微信手机预览中确认排版"],
+  });
+  view.validationEl = new TestElement();
+  try {
+    await view.checkArticle();
+    const text = view.validationEl.allText();
+    check("发布前检查区分错误、提醒和人工确认", text.includes("必须修复") && text.includes("建议处理") && text.includes("人工确认") && text.includes("正文图片不存在"));
+    const findButton = (node) => node.children.find(c => c.tag === "button") ?? node.children.map(findButton).find(Boolean);
+    const locate = findButton(view.validationEl);
+    check("诊断带有定位按钮", typeof locate?.onclick === "function");
+    if (locate) {
+      await locate.onclick();
+      check("定位打开中间编辑器并跳到源文件行", opened === file && openState?.eState?.line === 22 && openState?.state?.mode === "source");
+    }
+  } catch (error) { check("发布前检查显示结构化结果", false, String(error)); }
 }
 {
   const htmlPath = join(outDir, "preview.html");
@@ -638,9 +661,12 @@ console.log("保存与构建版本绑定");
   try { await pending; } catch { rejected = true; }
   check("切换文章后旧构建被拒绝且产物不可用", rejected && plugin.getLastBuild() === null);
   active = a;
-  globalThis.checkStub = async () => ({ article: { errors: [{ code: "E1", level: "ERROR", message: "错误示例" }], warnings: [{ code: "W1", level: "WARNING", message: "警告示例" }] } });
-  const issues = await plugin.checkCurrent();
-  check("校验界面收到单篇错误与警告", issues.length === 2 && issues[0].includes("错误示例") && issues[1].includes("警告示例"));
+  globalThis.checkStub = async (_options, _target, publish) => {
+    check("面板请求完整发布前检查", publish === true);
+    return { article: { errors: [{ code: "E1", level: "ERROR", message: "错误示例", line: 8 }], warnings: [{ code: "W1", level: "WARNING", message: "警告示例" }] } };
+  };
+  const checked = await plugin.checkCurrent();
+  check("校验界面保留单篇错误、警告和行号", checked.article.errors[0].message === "错误示例" && checked.article.errors[0].line === 8 && checked.article.warnings[0].message === "警告示例");
   let releaseFirst;
   let markStarted;
   let calls = 0;

@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
+from inloop.rules import MD_FORBIDDEN_TAG, MD_MATH_UNSUPPORTED, MD_RAW_FOOTNOTE, MD_TASK_CHECKBOX
+
 #: 正文中引用脚注时使用的上标结构（无 href，微信端不可跳转）。
 #: 这里只给"上标 + 尺寸 + 颜色"，颜色少样本就是中性灰，具体配色由微信渲染层覆盖。
 _FOOTNOTE_REF_STYLE = "vertical-align:super;font-size:12px;color:#6B7280;"
@@ -136,20 +138,24 @@ def normalize_html(html: str) -> NormalizeResult:
 
     if checkbox_count:
         warnings.append(
+            f"{MD_TASK_CHECKBOX.code} [{MD_TASK_CHECKBOX.level.value}] "
             f"任务列表复选框已降级为文本标记（{checkbox_count} 处）："
             f"微信正文不支持表单元素。"
         )
     if footnote_count:
         warnings.append(
+            f"{MD_RAW_FOOTNOTE.code} [{MD_RAW_FOOTNOTE.level.value}] "
             f"脚注已降级为文末注释列表（{footnote_count} 条）：微信正文不支持锚点跳转。"
         )
     if math_count:
         warnings.append(
+            f"{MD_MATH_UNSUPPORTED.code} [{MD_MATH_UNSUPPORTED.level.value}] "
             f"公式已降级为等宽文本（{math_count} 处）：微信不支持 MathML 或前端公式渲染。"
         )
     if removed_tags:
         distinct = "、".join(sorted(set(removed_tags)))
         warnings.append(
+            f"{MD_FORBIDDEN_TAG.code} [{MD_FORBIDDEN_TAG.level.value}] "
             f"产物中不允许出现的标签已被移除或解开：{distinct}。"
             f"若其中包含有实际内容的标签（如 video），其内容不会出现在正文里。"
         )

@@ -105,6 +105,7 @@ export interface CheckResult extends Envelope {
   article: ArticleSummary;
   error_count: number;
   warning_count: number;
+  manual_checks?: string[];
 }
 
 export interface CheckAllResult extends Envelope {
@@ -321,8 +322,8 @@ export function listArticles(options: CliOptions): Promise<ListResult> {
   return runCli<ListResult>(options, ["list"], true);
 }
 
-export function checkArticle(options: CliOptions, slug: string): Promise<CheckResult> {
-  return runCli<CheckResult>(options, ["check", slug], true);
+export function checkArticle(options: CliOptions, slug: string, publish = false): Promise<CheckResult> {
+  return runCli<CheckResult>(options, ["check", slug, ...(publish ? ["--publish"] : [])], !publish);
 }
 
 export function checkAll(options: CliOptions): Promise<CheckAllResult> {

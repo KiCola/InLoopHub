@@ -45,6 +45,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from markdown_it import MarkdownIt
+from markdown_it.rules_inline import StateInline
+from markdown_it.token import Token
 from mdit_py_plugins.dollarmath import dollarmath_plugin
 from mdit_py_plugins.footnote import footnote_plugin
 from mdit_py_plugins.tasklists import tasklists_plugin
@@ -84,7 +86,30 @@ def build_parser() -> MarkdownIt:
     md.enable("strikethrough")
     # 任务书 §5 要求支持脚注、公式、任务列表
     md = md.use(footnote_plugin).use(dollarmath_plugin).use(tasklists_plugin)
+    md.inline.ruler.before("image", "obsidian_embed", _parse_embed)
     return md
+
+
+def _parse_embed(state: StateInline, silent: bool) -> bool:
+    """在行内语法层处理图片，代码块和行内代码由解析器原样保留。"""
+    match = _EMBED.match(state.src, state.pos)
+    if match is None:
+        return False
+    converted, issues = convert_obsidian_embeds(match.group(0), state.env.get("resolve_embed"))
+    if converted == match.group(0):
+        return False
+    if not silent:
+        tokens: list[Token] = []
+        state.md.inline.parse(converted, state.md, state.env, tokens)
+        for parsed in tokens:
+            token = state.push(parsed.type, parsed.tag, parsed.nesting)
+            token.attrs = parsed.attrs
+            token.content = parsed.content
+            token.children = parsed.children
+            token.markup = parsed.markup
+        state.env.setdefault("embed_issues", []).extend(issues)
+    state.pos = match.end()
+    return True
 
 
 #: 模块级解析器实例。MarkdownIt 的规则配置在构造后不再变化，可安全复用。
@@ -124,20 +149,17 @@ def render_markdown(
     Raises:
         MarkdownRenderError: 解析器抛出异常（正常情况下不应发生）。
     """
-    # 先归一化 Obsidian 嵌入语法，再交给 markdown-it。
-    # 顺序不能反：markdown-it 认不出 ![[...]]，会把整行当普通文字。
-    text, embed_issues = convert_obsidian_embeds(text, resolve_embed)
-
+    env = {"resolve_embed": resolve_embed, "embed_issues": []}
     try:
-        html = _PARSER.render(text)
+        html = _PARSER.render(text, env)
     except Exception as exc:  # pragma: no cover - 解析器本身极少失败
         raise MarkdownRenderError(
             f"Markdown 渲染失败：{exc}\n"
             "修正方法：检查正文中是否存在未闭合的代码块（```）或表格分隔行。"
         ) from exc
 
-    warnings = list(_collect_warnings(text, html))
-    warnings.extend(embed_issues)
+    warnings = list(_collect_warnings(html))
+    warnings.extend(env["embed_issues"])
     return MarkdownRenderResult(html=html, warnings=tuple(warnings))
 
 
@@ -245,7 +267,7 @@ class MarkdownRenderError(ValueError):
     """Markdown 渲染失败。"""
 
 
-def _collect_warnings(source: str, html: str) -> tuple[str, ...]:
+def _collect_warnings(html: str) -> tuple[str, ...]:
     """收集渲染过程中的降级提示。"""
     warnings: list[str] = []
 

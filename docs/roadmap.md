@@ -27,7 +27,8 @@
 任务书 §25 的 P1：README 索引、`metadata.json`、模板系统、Rich CLI、
 GitHub Actions、pytest。
 
-其中 README 索引、`metadata.json`、模板系统、pytest 已完成；**剩余 GitHub Actions**。
+其中内容索引、`metadata.json`、模板系统、pytest 已实现；GitHub Actions
+已按任务书 §23 取消，不再作为待完成项。索引实际写入内容目录的 `INDEX.md`。
 
 ## 第三阶段（P2）—— 自动化
 
@@ -35,7 +36,11 @@ GitHub Actions、pytest。
 小红书卡片、B 站脚本、知乎适配。
 
 其中前三项直接服务于本项目的终局目标（人只写 Markdown，程序完成发布），
-见 `AGENTS.md` §11。当前架构已为它们预留接口与数据结构。
+见 `AGENTS.md` §11。上传图片、封面和创建草稿已有 Python 实现及模拟接口测试，
+真实公众号端到端验证、Obsidian 操作入口、草稿更新和失败恢复仍未完成。
+
+近期顺序：发布前检查与问题定位 → 一篇真实文章的微信人工验收 →
+核验账号条件并接通自动草稿 → 发布记录、更新与重试。多平台输出后置。
 
 ## 明确的边界
 

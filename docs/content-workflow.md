@@ -19,15 +19,15 @@ idea ─▶ researching ─▶ draft ─▶ review ─▶ ready ─▶ published
 
 1. **状态只在相邻之间移动。** 不要从 `idea` 直接跳 `ready`——跳过的中间状态通常意味着
    跳过了"自审"这一步，而发布事故基本都出在这里。
-2. **`ready` 之前必须跑一次检查。** 检查会覆盖 Front Matter 完整性、图片是否存在、
-   是否有绝对路径、Markdown 语法等；状态是承诺，检查是兑现承诺的方式。
+2. **`ready` 之前必须跑一次发布前检查。** 使用面板按钮或 `inloop check <文章> --publish`，
+   检查属性、图片路径/格式/体积和正文转换提示，再完成人工复核。
+   普通 `check` 仅做属性校验。程序不会因检查通过而自动改变写作状态。
 
 ## 关于修改状态
 
 系统提供按文章路径修改状态的命令（任务书 §17 的 `inloop status <article> <new-status>`），
-**该命令本轮未实现**，属于任务书 §25 未列入 P0 的部分。
-
-当前修改状态的方式是直接编辑 `<内容目录>/<年份>/<slug>/index.md` 的 Front Matter，\n或用 `inloop status <slug> <状态>`（只改 status 一行）。
+该命令已实现。可直接编辑 `<内容目录>/<年份>/<slug>/index.md` 的 Front Matter，
+或用 `inloop status <slug> <状态>`、面板状态下拉修改（只改 status 一行）。
 这是**唯一**允许改动已存在文章文件的场景，且改动范围仅限 `status` 一行。
 
 ## 分支策略

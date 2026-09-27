@@ -171,6 +171,20 @@ try {
   check("单篇校验返回结构化问题而非丢弃诊断", false, String(error));
 }
 
+// 发布前检查不得改写正文或既有产物。
+const invalidText = readFileSync(sourcePath, "utf8") + "\n![[missing-embed.png]]\n";
+writeFileSync(sourcePath, invalidText, "utf8");
+const previousHtml = buildResult ? readFileSync(buildResult.html_path, "utf8") : null;
+try {
+  const checked = await cli.checkArticle(options, "001-smoke", true);
+  check("发布前检查包含缺失嵌入图片错误", checked.article.errors.some(issue => issue.code === "IMG105"));
+  check("发布前检查附带人工确认项", checked.manual_checks?.length > 0);
+  check("发布前检查不修改正文", readFileSync(sourcePath, "utf8") === invalidText);
+  check("发布前检查不覆盖既有产物", !buildResult || readFileSync(buildResult.html_path, "utf8") === previousHtml);
+} catch (error) {
+  check("插件发布前检查调用成功", false, String(error));
+}
+
 // 清理。
 // 注意：只在真的拿到产物目录时才删它——写成 `rmSync(x ?? "")` 会在
 // 值为空时把路径解析成当前目录，把插件目录本身删掉（第一版真这么写过）。
